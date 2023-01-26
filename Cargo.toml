@@ -1,0 +1,18 @@
+[package]
+name = "rp1210"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "logger"
+path = "src/main.rs"
+
+[lib]
+name = "rp1210"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "^1"
+libloading = "^0.7"
+rust-ini="^0.18"
+clap = { version = "4.0.32", features = ["derive"] }
