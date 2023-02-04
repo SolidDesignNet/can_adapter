@@ -22,6 +22,14 @@ pub struct MultiQueue<T: Clone> {
     head: Arc<RwLock<MqNode<T>>>,
 }
 
+impl<T: Clone> std::fmt::Debug for MultiQueue<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MultiQueue")
+            //.field("head", &self.head)
+            .finish()
+    }
+}
+
 /// Iterator
 struct MqIter<T> {
     head: MqNode<T>,

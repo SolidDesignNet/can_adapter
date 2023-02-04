@@ -20,6 +20,7 @@ type _VERSION = unsafe extern "stdcall" fn(i16, *const u8, i16, i16) -> i16;
 type GetErrorType = unsafe extern "stdcall" fn(i16, *const u8) -> i16;
 type ClientDisconnectType = unsafe extern "stdcall" fn(i16) -> i16;
 
+#[derive(Debug)]
 pub struct Rp1210 {
     pub bus: MultiQueue<J1939Packet>,
     api: API,
@@ -29,6 +30,7 @@ pub struct Rp1210 {
     pub device: i16,
     pub connection_string: String,
 }
+#[derive(Debug)]
 struct API {
     id: i16,
 
@@ -153,7 +155,7 @@ impl Rp1210 {
         })
     }
     /// background thread to read all packets into queue
-    pub fn run(&mut self) {
+    pub fn run(&mut self) -> std::thread::JoinHandle<()> {
         let read = *self.api.read_fn;
         let get_error_fn = *self.api.get_error_fn;
         let running = self.running.clone();
@@ -183,7 +185,7 @@ impl Rp1210 {
                     std::thread::yield_now();
                 }
             }
-        });
+        })
     }
 
     /// Send packet and return packet echoed back from adapter
