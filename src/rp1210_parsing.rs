@@ -2,25 +2,27 @@ use std::fmt::Display;
 
 use anyhow::*;
 
+use crate::rp1210::Rp1210;
+
 #[derive(Debug)]
-pub struct Rp1210Dev {
+pub struct Rp1210Device {
     pub id: i16,
     pub name: String,
     pub description: String,
 }
 #[derive(Debug)]
-pub struct Rp1210Prod {
+pub struct Rp1210Product {
     pub id: String,
     pub description: String,
-    pub devices: Vec<Rp1210Dev>,
+    pub devices: Vec<Rp1210Device>,
 }
 
-impl Display for Rp1210Dev {
+impl Display for Rp1210Device {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{} {}:{}", self.id, self.name, self.description)
     }
 }
-impl Display for Rp1210Prod {
+impl Display for Rp1210Product {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         writeln!(f, "{} {}", self.id, self.description)?;
         for d in &self.devices {
@@ -30,12 +32,20 @@ impl Display for Rp1210Prod {
     }
 }
 
-pub fn list_all_products() -> Result<Vec<Rp1210Prod>> {
+pub fn list_all_products() -> Result<Vec<Rp1210Product>> {
     let start = std::time::Instant::now();
     let load_from_file = ini::Ini::load_from_file("c:\\Windows\\RP121032.ini");
     if load_from_file.is_err() {
         // don't fail on linux
-        return Ok(Vec::new());
+        return Ok(vec![Rp1210Product {
+            id: "SIM".to_string(),
+            description: "Simulated Adapter".to_string(),
+            devices: vec![Rp1210Device {
+                id: 1,
+                name: "SIM".to_string(),
+                description: "Simulated Device".to_string(),
+            }],
+        }]);
     }
     let rtn = Ok(load_from_file?
         .get_from(Some("RP1210Support"), "APIImplementations")
@@ -43,7 +53,7 @@ pub fn list_all_products() -> Result<Vec<Rp1210Prod>> {
         .split(',')
         .map(|s| {
             let (description, devices) = list_devices_for_prod(s).unwrap();
-            Rp1210Prod {
+            Rp1210Product {
                 id: s.to_string(),
                 description: description.to_string(),
                 devices,
@@ -54,7 +64,7 @@ pub fn list_all_products() -> Result<Vec<Rp1210Prod>> {
     rtn
 }
 
-fn list_devices_for_prod(id: &str) -> Result<(String, Vec<Rp1210Dev>)> {
+fn list_devices_for_prod(id: &str) -> Result<(String, Vec<Rp1210Device>)> {
     let start = std::time::Instant::now();
     let ini = ini::Ini::load_from_file(&format!("c:\\Windows\\{}.ini", id))?;
 
@@ -81,7 +91,7 @@ fn list_devices_for_prod(id: &str) -> Result<(String, Vec<Rp1210Dev>)> {
             section.unwrap().starts_with("DeviceInformation")
                 && j1939_devices.contains(&properties.get("DeviceID").unwrap_or("X"))
         })
-        .map(|(_, properties)| Rp1210Dev {
+        .map(|(_, properties)| Rp1210Device {
             id: properties.get("DeviceID").unwrap_or("0").parse().unwrap(),
             name: properties
                 .get("DeviceName")
