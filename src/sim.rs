@@ -34,9 +34,10 @@ impl Rp1210 {
     pub fn run(&mut self) -> std::thread::JoinHandle<()> {
         let mut bus = self.bus.clone();
         let running = self.running.clone();
+        let dev = self.device as u8;
         std::thread::spawn(move || {
             running.store(true, Ordering::Relaxed);
-            let mut seq: u64 = 0;
+            let mut seq: u64 = u64::from_be_bytes([dev, 0, 0, 0, 0, 0, 0, 0]);
             while running.load(Ordering::Relaxed) {
                 bus.push(J1939Packet::new_packet(
                     6,

@@ -37,15 +37,35 @@ pub fn list_all_products() -> Result<Vec<Rp1210Product>> {
     let load_from_file = ini::Ini::load_from_file("c:\\Windows\\RP121032.ini");
     if load_from_file.is_err() {
         // don't fail on linux
-        return Ok(vec![Rp1210Product {
-            id: "SIM".to_string(),
-            description: "Simulated Adapter".to_string(),
-            devices: vec![Rp1210Device {
-                id: 1,
-                name: "SIM".to_string(),
-                description: "Simulated Device".to_string(),
-            }],
-        }]);
+        return Ok(vec![
+            Rp1210Product {
+                id: "SIM".to_string(),
+                description: "Simulated Adapter 1".to_string(),
+                devices: vec![Rp1210Device {
+                    id: 1,
+                    name: "SIM".to_string(),
+                    description: "Simulated Device".to_string(),
+                }],
+            },
+            Rp1210Product {
+                id: "SIM".to_string(),
+                description: "Simulated Adapter 2".to_string(),
+                devices: vec![Rp1210Device {
+                    id: 2,
+                    name: "SIM".to_string(),
+                    description: "Simulated Device 2".to_string(),
+                }],
+            },
+            Rp1210Product {
+                id: "SIM".to_string(),
+                description: "Simulated Adapter 3".to_string(),
+                devices: vec![Rp1210Device {
+                    id: 3,
+                    name: "SIM".to_string(),
+                    description: "Simulated Device 3".to_string(),
+                }],
+            },
+        ]);
     }
     let rtn = Ok(load_from_file?
         .get_from(Some("RP1210Support"), "APIImplementations")
