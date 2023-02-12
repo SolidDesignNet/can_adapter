@@ -138,6 +138,16 @@ impl J1939Packet {
             self.source()
         )
     }
+    pub fn id(&self) -> u32 {
+        let d = &self.packet.data;
+        let o = self.offset();
+        let id = u32::from_le_bytes([d[o + 4], d[o], d[o + 1], d[o + 2]]);
+        if id > 0xF000 {
+            id | ((d[o + 4] as u32) << 8)
+        } else {
+            id
+        }
+    }
     pub fn data_str(&self) -> String {
         as_hex(&self.data())
     }

@@ -2,8 +2,6 @@ use std::fmt::Display;
 
 use anyhow::*;
 
-use crate::rp1210::Rp1210;
-
 #[derive(Debug)]
 pub struct Rp1210Device {
     pub id: i16,
