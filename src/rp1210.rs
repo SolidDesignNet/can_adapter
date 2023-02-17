@@ -167,17 +167,19 @@ impl Rp1210 {
 
         let connection_string = channel
             .map(|c| format!("{};Channel={}", self.connection_string, c))
-            .unwrap_or(self.connection_string);
+            .unwrap_or(self.connection_string.clone());
         self.api
             .client_connect(self.device, connection_string.as_str(), self.address, false)?;
 
         let driver = format!("{} {} {}", self.id, self.device, connection_string);
         Ok(std::thread::spawn(move || {
             let mut buf: [u8; PACKET_SIZE] = [0; PACKET_SIZE];
+            let channel = channel.unwrap_or(0);
             while running.load(Relaxed) {
                 let size = unsafe { read(id, buf.as_mut_ptr(), PACKET_SIZE as i16, 0) };
                 if size > 0 {
                     bus.push(J1939Packet::new_rp1210(
+                        channel,
                         &buf[0..size as usize],
                         time_stamp_weight,
                     ))
