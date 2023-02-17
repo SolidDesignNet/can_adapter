@@ -31,7 +31,7 @@ impl Rp1210 {
         })
     }
     /// background thread to read all packets into queue
-    pub fn run(&mut self) -> std::thread::JoinHandle<()> {
+    pub fn run(&mut self, channel: Option<u8>) -> std::thread::JoinHandle<()> {
         let mut bus = self.bus.clone();
         let running = self.running.clone();
         let dev = self.device as u8;
@@ -40,6 +40,7 @@ impl Rp1210 {
             let mut seq: u64 = u64::from_be_bytes([dev, 0, 0, 0, 0, 0, 0, 0]);
             while running.load(Ordering::Relaxed) {
                 bus.push(J1939Packet::new_packet(
+                    channel.unwrap_or(0),
                     6,
                     0xFFFF,
                     0,

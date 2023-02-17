@@ -28,6 +28,7 @@ pub struct Rp1210 {
     pub running: Arc<AtomicBool>,
     pub id: String,
     pub device: i16,
+    address: u8,
     pub connection_string: String,
 }
 #[derive(Debug)]
@@ -143,7 +144,6 @@ impl Rp1210 {
         bus: MultiQueue<J1939Packet>,
     ) -> Result<Rp1210> {
         let mut api = API::new(id)?;
-        api.client_connect(device, connection_string, address, false)?;
         Ok(Rp1210 {
             api,
             bus,
@@ -151,11 +151,12 @@ impl Rp1210 {
             running: Arc::new(AtomicBool::new(false)),
             id: id.to_string(),
             device,
+            address,
             connection_string: connection_string.to_string(),
         })
     }
     /// background thread to read all packets into queue
-    pub fn run(&mut self) -> std::thread::JoinHandle<()> {
+    pub fn run(&mut self, channel: Option<u8>) -> Result<std::thread::JoinHandle<()>> {
         let read = *self.api.read_fn;
         let get_error_fn = *self.api.get_error_fn;
         let running = self.running.clone();
@@ -163,8 +164,15 @@ impl Rp1210 {
         let mut bus = self.bus.clone();
         let time_stamp_weight = self.time_stamp_weight;
         running.store(true, Relaxed);
-        let driver = format!("{} {} {}", self.id, self.device, self.connection_string);
-        std::thread::spawn(move || {
+
+        let connection_string = channel
+            .map(|c| format!("{};Channel={}", self.connection_string, c))
+            .unwrap_or(self.connection_string);
+        self.api
+            .client_connect(self.device, connection_string.as_str(), self.address, false)?;
+
+        let driver = format!("{} {} {}", self.id, self.device, connection_string);
+        Ok(std::thread::spawn(move || {
             let mut buf: [u8; PACKET_SIZE] = [0; PACKET_SIZE];
             while running.load(Relaxed) {
                 let size = unsafe { read(id, buf.as_mut_ptr(), PACKET_SIZE as i16, 0) };
@@ -185,7 +193,7 @@ impl Rp1210 {
                     std::thread::yield_now();
                 }
             }
-        })
+        }))
     }
 
     /// Send packet and return packet echoed back from adapter

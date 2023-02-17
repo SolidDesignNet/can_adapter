@@ -59,7 +59,7 @@ fn hex8(str: &str) -> Result<u8, std::num::ParseIntError> {
 fn main() -> Result<(), anyhow::Error> {
     let bus: MultiQueue<J1939Packet> = MultiQueue::new();
     let mut rp1210 = ConnectionDescriptor::parse().connect(bus.clone())?;
-    rp1210.run();
+    rp1210.run(None);
     bus.iter_for(Duration::from_secs(60 * 60 * 24 * 7))
         .for_each(|p| println!("{}", p));
     Ok(())

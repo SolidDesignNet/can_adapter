@@ -9,6 +9,7 @@ pub struct Packet {
 pub struct J1939Packet {
     pub packet: Packet,
     pub tx: bool,
+    channel: u8,
     time_stamp_weight: f64,
 }
 
@@ -16,7 +17,8 @@ impl Display for J1939Packet {
     fn fmt(&self, f: &mut Formatter) -> Result {
         write!(
             f,
-            "{:12.4} {} [{}] {}{}",
+            "{:12.4} {} {} [{}] {}{}",
+            self.channel(),
             self.time(),
             self.header(),
             self.length(),
@@ -53,10 +55,11 @@ impl Packet {
 }
 impl J1939Packet {
     #[allow(dead_code)]
-    pub fn new_rp1210(data: &[u8], time_stamp_weight: f64) -> J1939Packet {
+    pub fn new_rp1210(channel: u8, data: &[u8], time_stamp_weight: f64) -> J1939Packet {
         J1939Packet {
             packet: Packet::new_rp1210(data),
             tx: false,
+            channel,
             time_stamp_weight,
         }
     }
@@ -65,9 +68,17 @@ impl J1939Packet {
     }
 
     #[allow(dead_code)]
-    pub fn new_packet(priority: u8, pgn: u32, da: u8, sa: u8, data: &[u8]) -> J1939Packet {
+    pub fn new_packet(
+        channel: u8,
+        priority: u8,
+        pgn: u32,
+        da: u8,
+        sa: u8,
+        data: &[u8],
+    ) -> J1939Packet {
         let da = if pgn >= 0xF000 { 0 } else { da };
         Self::new(
+            channel,
             ((priority as u32) << 24)
                 | (pgn << 8)
                 | if pgn >= 0xf000 { 0 } else { (da as u32) << 8 }
@@ -77,7 +88,7 @@ impl J1939Packet {
     }
     // FIXME use a RP1210 encoder/decoder!
     #[allow(dead_code)]
-    pub fn new(head: u32, data: &[u8]) -> J1939Packet {
+    pub fn new(channel: u8, head: u32, data: &[u8]) -> J1939Packet {
         let pgn = 0xFFFF & (head >> 8);
         let da = if pgn < 0xF000 { 0xFF & pgn } else { 0 } as u8;
         let hb = head.to_be_bytes();
@@ -85,6 +96,7 @@ impl J1939Packet {
         J1939Packet {
             packet: Packet::new_rp1210(&buf),
             tx: true,
+            channel,
             time_stamp_weight: 0.0,
         }
     }
@@ -155,6 +167,10 @@ impl J1939Packet {
     pub fn data(&self) -> &[u8] {
         &self.packet.data[self.offset() + 6..]
     }
+
+    pub fn channel(&self) -> u8 {
+        self.channel
+    }
 }
 #[cfg(test)]
 mod tests {
@@ -165,15 +181,15 @@ mod tests {
     fn test_j1939packet_display() {
         assert_eq!(
             "      0.0000 18FFAAFA [3] 01 02 03 (TX)",
-            J1939Packet::new(0x18FFAAFA, &[1, 2, 3]).to_string()
+            J1939Packet::new(0,0x18FFAAFA, &[1, 2, 3]).to_string()
         );
         assert_eq!(
             "      0.0000 18FFAAF9 [8] 01 02 03 04 05 06 07 08 (TX)",
-            J1939Packet::new(0x18FFAAF9, &[1, 2, 3, 4, 5, 6, 7, 8]).to_string()
+            J1939Packet::new(0,0x18FFAAF9, &[1, 2, 3, 4, 5, 6, 7, 8]).to_string()
         );
         assert_eq!(
             "      0.0000 18FFAAFB [8] FF 00 FF 00 FF 00 FF 00 (TX)",
-            J1939Packet::new(0x18FFAAFB, &[0xFF, 00, 0xFF, 00, 0xFF, 00, 0xFF, 00]).to_string()
+            J1939Packet::new(0,0x18FFAAFB, &[0xFF, 00, 0xFF, 00, 0xFF, 00, 0xFF, 00]).to_string()
         );
     }
 }
