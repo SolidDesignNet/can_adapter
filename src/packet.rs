@@ -1,8 +1,8 @@
-use std::fmt::*;
+use std::{fmt::*, ops::Deref};
 
 #[derive(Default, Debug, Clone)]
 pub struct Packet {
-    pub data: Vec<u8>,
+    data: Vec<u8>,
 }
 
 #[derive(Default, Debug, Clone)]
@@ -13,6 +13,14 @@ pub struct J1939Packet {
     time_stamp_weight: f64,
 }
 
+impl Deref for J1939Packet {
+    type Target = Packet;
+
+    fn deref(&self) -> &Self::Target {
+        &self.packet
+    }
+}
+
 impl Display for J1939Packet {
     fn fmt(&self, f: &mut Formatter) -> Result {
         write!(
@@ -21,12 +29,13 @@ impl Display for J1939Packet {
             self.time(),
             self.channel(),
             self.header(),
-            self.length(),
+            self.len(),
             self.data_str(),
             if self.echo() { " (TX)" } else { "" }
         )
     }
 }
+
 fn as_hex(data: &[u8]) -> String {
     let mut s = String::new();
     for byte in data {
@@ -34,6 +43,7 @@ fn as_hex(data: &[u8]) -> String {
     }
     s[1..].to_string()
 }
+
 impl Display for Packet {
     fn fmt(&self, f: &mut Formatter) -> Result {
         write!(
@@ -45,6 +55,7 @@ impl Display for Packet {
         )
     }
 }
+
 impl Packet {
     #[allow(dead_code)]
     pub fn new_rp1210(data: &[u8]) -> Packet {
@@ -53,6 +64,7 @@ impl Packet {
         }
     }
 }
+
 impl J1939Packet {
     #[allow(dead_code)]
     pub fn new_rp1210(channel: u8, data: &[u8], time_stamp_weight: f64) -> J1939Packet {
@@ -63,8 +75,9 @@ impl J1939Packet {
             time_stamp_weight,
         }
     }
-    pub fn length(&self) -> usize {
-        self.packet.data.len() - 6 - self.offset()
+
+    pub fn len(&self) -> usize {
+        self.data.len() - 6 - self.offset()
     }
 
     #[allow(dead_code)]
@@ -86,6 +99,7 @@ impl J1939Packet {
             data,
         )
     }
+
     // FIXME use a RP1210 encoder/decoder!
     #[allow(dead_code)]
     pub fn new(channel: u8, head: u32, data: &[u8]) -> J1939Packet {
@@ -100,21 +114,22 @@ impl J1939Packet {
             time_stamp_weight: 0.0,
         }
     }
+
     pub fn time(&self) -> f64 {
         if self.tx {
             0.0
         } else {
             // FIXME mask is probably not necessary
-            ((0xFF000000 & (self.packet.data[0] as u64) << 24)
-                | (0xFF0000 & (self.packet.data[1] as u64) << 16)
-                | (0xFF00 & (self.packet.data[2] as u64) << 8)
-                | (0xFF & (self.packet.data[3] as u64))) as f64
+            ((0xFF000000 & (self.data[0] as u64) << 24)
+                | (0xFF0000 & (self.data[1] as u64) << 16)
+                | (0xFF00 & (self.data[2] as u64) << 8)
+                | (0xFF & (self.data[3] as u64))) as f64
                 * 0.001
                 * self.time_stamp_weight
         }
     }
 
-    /// offset into array for common data (tx and not tx)
+    /// offset into array for data common to tx and rx RP1210 formats
     fn offset(&self) -> usize {
         if self.tx {
             0
@@ -124,25 +139,28 @@ impl J1939Packet {
     }
 
     pub fn echo(&self) -> bool {
-        self.tx || self.packet.data[4] != 0
+        self.tx || self.data[4] != 0
     }
 
     pub fn source(&self) -> u8 {
-        self.packet.data[4 + self.offset()]
+        self.data[4 + self.offset()]
     }
+
     pub fn pgn(&self) -> u32 {
-        let mut pgn = ((self.packet.data[2 + self.offset()] as u32 & 0xFF) << 16)
-            | ((self.packet.data[1 + self.offset()] as u32 & 0xFF) << 8)
-            | (self.packet.data[self.offset()] as u32 & 0xFF);
+        let mut pgn = ((self.data[2 + self.offset()] as u32 & 0xFF) << 16)
+            | ((self.data[1 + self.offset()] as u32 & 0xFF) << 8)
+            | (self.data[self.offset()] as u32 & 0xFF);
         if pgn < 0xF000 {
-            let destination = self.packet.data[5 + self.offset()] as u32;
+            let destination = self.data[5 + self.offset()] as u32;
             pgn |= destination;
         }
         pgn
     }
+
     pub fn priority(&self) -> u8 {
-        self.packet.data[3 + self.offset()] & 0x07
+        self.data[3 + self.offset()] & 0x07
     }
+
     pub fn header(&self) -> String {
         format!(
             "{:06X}{:02X}",
@@ -150,8 +168,9 @@ impl J1939Packet {
             self.source()
         )
     }
+
     pub fn id(&self) -> u32 {
-        let d = &self.packet.data;
+        let d = &self.data;
         let o = self.offset();
         let id = u32::from_le_bytes([d[o + 4], d[o], d[o + 1], d[o + 2]]);
         if id > 0xF000 {
@@ -160,18 +179,20 @@ impl J1939Packet {
             id
         }
     }
+
     pub fn data_str(&self) -> String {
         as_hex(&self.data())
     }
 
     pub fn data(&self) -> &[u8] {
-        &self.packet.data[self.offset() + 6..]
+        &self.data[self.offset() + 6..]
     }
 
     pub fn channel(&self) -> u8 {
         self.channel
     }
 }
+
 #[cfg(test)]
 mod tests {
     // Note this useful idiom: importing names from outer (for mod tests) scope.
