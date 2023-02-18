@@ -18,8 +18,8 @@ impl Display for J1939Packet {
         write!(
             f,
             "{:12.4} {} {} [{}] {}{}",
-            self.channel(),
             self.time(),
+            self.channel(),
             self.header(),
             self.length(),
             self.data_str(),
@@ -181,15 +181,15 @@ mod tests {
     fn test_j1939packet_display() {
         assert_eq!(
             "      0.0000 18FFAAFA [3] 01 02 03 (TX)",
-            J1939Packet::new(0,0x18FFAAFA, &[1, 2, 3]).to_string()
+            J1939Packet::new(0, 0x18FFAAFA, &[1, 2, 3]).to_string()
         );
         assert_eq!(
             "      0.0000 18FFAAF9 [8] 01 02 03 04 05 06 07 08 (TX)",
-            J1939Packet::new(0,0x18FFAAF9, &[1, 2, 3, 4, 5, 6, 7, 8]).to_string()
+            J1939Packet::new(0, 0x18FFAAF9, &[1, 2, 3, 4, 5, 6, 7, 8]).to_string()
         );
         assert_eq!(
             "      0.0000 18FFAAFB [8] FF 00 FF 00 FF 00 FF 00 (TX)",
-            J1939Packet::new(0,0x18FFAAFB, &[0xFF, 00, 0xFF, 00, 0xFF, 00, 0xFF, 00]).to_string()
+            J1939Packet::new(0, 0x18FFAAFB, &[0xFF, 00, 0xFF, 00, 0xFF, 00, 0xFF, 00]).to_string()
         );
     }
 }

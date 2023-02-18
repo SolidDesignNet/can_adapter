@@ -157,6 +157,12 @@ impl Rp1210 {
     }
     /// background thread to read all packets into queue
     pub fn run(&mut self, channel: Option<u8>) -> Result<std::thread::JoinHandle<()>> {
+        let connection_string = channel
+            .map(|c| format!("{};Channel={}", self.connection_string, c))
+            .unwrap_or(self.connection_string.clone());
+        self.api
+            .client_connect(self.device, connection_string.as_str(), self.address, false)?;
+
         let read = *self.api.read_fn;
         let get_error_fn = *self.api.get_error_fn;
         let running = self.running.clone();
@@ -164,12 +170,6 @@ impl Rp1210 {
         let mut bus = self.bus.clone();
         let time_stamp_weight = self.time_stamp_weight;
         running.store(true, Relaxed);
-
-        let connection_string = channel
-            .map(|c| format!("{};Channel={}", self.connection_string, c))
-            .unwrap_or(self.connection_string.clone());
-        self.api
-            .client_connect(self.device, connection_string.as_str(), self.address, false)?;
 
         let driver = format!("{} {} {}", self.id, self.device, connection_string);
         Ok(std::thread::spawn(move || {
