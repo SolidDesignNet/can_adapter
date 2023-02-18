@@ -2,7 +2,7 @@ use std::{fmt::*, ops::Deref};
 
 #[derive(Default, Debug, Clone)]
 pub struct Packet {
-    data: Vec<u8>,
+    pub data: Vec<u8>,
 }
 
 #[derive(Default, Debug, Clone)]
