@@ -119,12 +119,9 @@ impl J1939Packet {
         if self.tx {
             0.0
         } else {
-            // FIXME mask is probably not necessary
-            ((0xFF000000 & (self.data[0] as u64) << 24)
-                | (0xFF0000 & (self.data[1] as u64) << 16)
-                | (0xFF00 & (self.data[2] as u64) << 8)
-                | (0xFF & (self.data[3] as u64))) as f64
-                * 0.001
+            let bytes = &self.data[0..4];
+            u32::from_be_bytes(bytes.try_into().unwrap()) as f64
+                * 0.000001 // convert to s
                 * self.time_stamp_weight
         }
     }

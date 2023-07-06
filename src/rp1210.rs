@@ -143,7 +143,7 @@ impl Rp1210 {
         address: u8,
         bus: MultiQueue<J1939Packet>,
     ) -> Result<Rp1210> {
-        let mut api = API::new(id)?;
+        let api = API::new(id)?;
         Ok(Rp1210 {
             api,
             bus,
@@ -192,7 +192,7 @@ impl Rp1210 {
                         eprintln!("ERROR: {}: {}: {}", driver, code, msg,);
                         std::thread::sleep(Duration::from_secs_f32(0.25))
                     }
-                    std::thread::yield_now();
+                    std::thread::sleep(Duration::from_millis(1));
                 }
             }
         }))
