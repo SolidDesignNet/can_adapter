@@ -125,7 +125,7 @@ mod tests {
     fn simple() {
         let mut q: MultiQueue<&str> = MultiQueue::new();
         q.push("one");
-        let mut i = q.iter();
+        let mut i = q.iter_for(Duration::from_millis(200));
         q.push("two");
         q.push("three");
         assert_eq!("two", i.next().unwrap());

@@ -156,12 +156,12 @@ impl Rp1210 {
         })
     }
     /// background thread to read all packets into queue
-    pub fn run(&mut self, channel: Option<u8>) -> Result<std::thread::JoinHandle<()>> {
+    pub fn run(&mut self, channel: Option<u8>,app_packetize:bool) -> Result<std::thread::JoinHandle<()>> {
         let connection_string = channel
             .map(|c| format!("{};Channel={}", self.connection_string, c))
             .unwrap_or(self.connection_string.clone());
         self.api
-            .client_connect(self.device, connection_string.as_str(), self.address, false)?;
+            .client_connect(self.device, connection_string.as_str(), self.address, app_packetize)?;
 
         let read = *self.api.read_fn;
         let get_error_fn = *self.api.get_error_fn;

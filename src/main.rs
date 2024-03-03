@@ -25,16 +25,19 @@ pub struct ConnectionDescriptor {
     /// RP1210 Device ID
     device: i16,
 
-    #[arg(long, default_value = "J1939:Baud=Auto")]
+    #[arg(long, short, default_value = "J1939:Baud=Auto")]
     /// RP1210 Connection String
     connection_string: String,
 
-    #[arg(long, default_value = "F9",value_parser=hex8)]
+    #[arg(long="sa", short, default_value = "F9",value_parser=hex8)]
     /// RP1210 Adapter Address (used for packets send and transport protocol)
-    address: u8,
+    source_address: u8,
 
     #[arg(long, short, default_value = "false")]
     verbose: bool,
+
+    #[arg(long, short, default_value = "false")]
+    app_packetize: bool,
 }
 
 impl ConnectionDescriptor {
@@ -46,7 +49,7 @@ impl ConnectionDescriptor {
             &self.adapter,
             self.device,
             &self.connection_string,
-            self.address,
+            self.source_address,
             bus.clone(),
         )
     }
@@ -58,8 +61,9 @@ fn hex8(str: &str) -> Result<u8, std::num::ParseIntError> {
 
 fn main() -> Result<(), anyhow::Error> {
     let bus: MultiQueue<J1939Packet> = MultiQueue::new();
-    let mut rp1210 = ConnectionDescriptor::parse().connect(bus.clone())?;
-    let _thread = rp1210.run(None)?;
+    let parse = &ConnectionDescriptor::parse();
+    let mut rp1210 = parse.connect(bus.clone())?;
+    let _thread = rp1210.run(None, parse.app_packetize)?;
     bus.iter_for(Duration::from_secs(60 * 60 * 24 * 7))
         .for_each(|p| println!("{}", p));
     Ok(())

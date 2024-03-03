@@ -1,6 +1,6 @@
 [package]
 name = "rp1210"
-version = "0.1.2"
+version = "0.2.0"
 edition = "2021"
 
 [[bin]]
@@ -13,6 +13,6 @@ path = "src/main.rs"
 
 [dependencies]
 anyhow = "^1"
-libloading = "^0.7"
-rust-ini="^0.18"
-clap = { version = "4.0.32", features = ["derive"] }
+libloading = "0.8.2"
+rust-ini="0.20.0"
+clap = { version = "4.5.1", features = ["derive"] }
