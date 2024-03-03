@@ -70,7 +70,7 @@ pub fn list_all_products() -> Result<Vec<Rp1210Product>> {
         .unwrap_or("")
         .split(',')
         .map(|s| {
-            let (description, devices) = list_devices_for_prod(s).unwrap();
+            let (description, devices) = list_devices_for_prod(s).unwrap_or_default();
             Rp1210Product {
                 id: s.to_string(),
                 description: description.to_string(),
@@ -106,11 +106,16 @@ fn list_devices_for_prod(id: &str) -> Result<(String, Vec<Rp1210Device>)> {
     let rtn = ini
         .iter()
         .filter(|(section, properties)| {
-            section.unwrap().starts_with("DeviceInformation")
-                && j1939_devices.contains(&properties.get("DeviceID").unwrap_or("X"))
+            section
+                .map(|n| n.starts_with("DeviceInformation"))
+                .unwrap_or(false)
+                && properties
+                    .get("DeviceID")
+                    .map(|id| j1939_devices.contains(&id))
+                    .unwrap_or(false)
         })
         .map(|(_, properties)| Rp1210Device {
-            id: properties.get("DeviceID").unwrap_or("0").parse().unwrap(),
+            id: properties.get("DeviceID").unwrap_or("0").parse().unwrap_or(-1),
             name: properties
                 .get("DeviceName")
                 .unwrap_or("Unknown")
@@ -124,9 +129,8 @@ fn list_devices_for_prod(id: &str) -> Result<(String, Vec<Rp1210Device>)> {
     println!("  {}.ini parsing in {} ms", id, start.elapsed().as_millis());
     let description = ini
         .section(Some("VendorInformation"))
-        .unwrap()
-        .get("Name")
-        .unwrap()
+        .and_then(|s|s.get("Name"))
+        .unwrap_or_default()
         .to_string();
     Ok((description, rtn))
 }
@@ -137,4 +141,14 @@ pub fn time_stamp_weight(id: &str) -> Result<f64> {
     Ok(ini
         .get_from_or::<&str>(Some("VendorInformation"), "TimeStampWeight", "1")
         .parse()?)
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn simple() -> Result<(), Error> {
+        list_all_products()?;
+        Ok(())
+    }
 }
