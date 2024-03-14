@@ -44,7 +44,7 @@ where
     fn next(&mut self) -> std::option::Option<<Self as std::iter::Iterator>::Item> {
         let mut o = None;
         while o.is_none() && Instant::now() < self.until {
-            thread::yield_now();
+            thread::sleep(Duration::from_millis(1));
             o = self
                 .head
                 .read()
