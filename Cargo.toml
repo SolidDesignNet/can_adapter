@@ -14,5 +14,5 @@ path = "src/main.rs"
 [dependencies]
 anyhow = "^1"
 libloading = "0.8.2"
-rust-ini="0.20.0"
+rust-ini="0.21.0"
 clap = { version = "4.5.1", features = ["derive"] }

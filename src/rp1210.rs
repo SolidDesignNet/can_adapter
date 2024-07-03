@@ -192,7 +192,7 @@ impl Rp1210 {
                         eprintln!("ERROR: {}: {}: {}", driver, code, msg,);
                         std::thread::sleep(Duration::from_secs_f32(0.25))
                     }
-                    std::thread::sleep(Duration::from_millis(1));
+                    std::hint::spin_loop()
                 }
             }
         }))
