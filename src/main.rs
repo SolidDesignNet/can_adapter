@@ -1,6 +1,6 @@
-use std::time::Duration;
+use std::{default, fmt::Write, time::Duration};
 
-use clap::Parser;
+use clap::{parser, Args, CommandFactory, FromArgMatches, Parser};
 use multiqueue::MultiQueue;
 use packet::J1939Packet;
 
@@ -18,26 +18,34 @@ pub mod rp1210;
 pub mod rp1210_parsing;
 
 #[derive(Parser, Debug, Default, Clone)]
+pub struct Cli {
+    #[command(flatten)]
+    pub connection: ConnectionDescriptor,
+}
+#[derive(Args, Debug, Default, Clone)]
+#[command(after_help = "asdf")]
 pub struct ConnectionDescriptor {
     /// RP1210 Adapter Identifier
-    adapter: String,
+    #[arg(long, short('D'))]
+    pub adapter: String,
 
     /// RP1210 Device ID
-    device: i16,
+    #[arg(long, short('d'))]
+    pub device: i16,
 
-    #[arg(long, short, default_value = "J1939:Baud=Auto")]
+    #[arg(long, short('C'), default_value = "J1939:Baud=Auto")]
     /// RP1210 Connection String
-    connection_string: String,
+    pub connection_string: String,
 
-    #[arg(long="sa", short, default_value = "F9",value_parser=hex8)]
+    #[arg(long="sa", short('a'), default_value = "F9",value_parser=hex8)]
     /// RP1210 Adapter Address (used for packets send and transport protocol)
-    source_address: u8,
+    pub source_address: u8,
 
-    #[arg(long, short, default_value = "false")]
-    verbose: bool,
+    #[arg(long, short('v'), default_value = "false")]
+    pub verbose: bool,
 
-    #[arg(long, short, default_value = "false")]
-    app_packetize: bool,
+    #[arg(long, default_value = "false")]
+    pub app_packetize: bool,
 }
 
 impl ConnectionDescriptor {
@@ -60,10 +68,43 @@ fn hex8(str: &str) -> Result<u8, std::num::ParseIntError> {
 }
 
 fn main() -> Result<(), anyhow::Error> {
+    let help = rp1210_parsing::list_all_products()
+        .unwrap()
+        .iter()
+        .flat_map(|p| {
+            std::iter::once(format!(
+                color_print::cstr!("  <b>{}</> <b>{}</>"),
+                p.id, p.description
+            ))
+            .chain(p.devices.iter().map(|p| {
+                format!(
+                    color_print::cstr!("    --adapter <bold>{}</> --device <bold>{}</>: {}"),
+                    p.name, p.id, p.description
+                )
+            }))
+        })
+        .collect::<Vec<String>>()
+        .join("\n");
+
+    // inline Command::parse() to override the after_help
+    let mut command = Cli::command();
+    let mut usage = command.render_usage();
+    usage.write_str(color_print::cstr!("\n\n<bold>RP1210 Devices:<bold>\n"))?;
+    usage.write_str(help.as_str())?;
+    command = command.override_usage(usage);
+    let c = &mut command;
+    let parse = {
+        let mut matches = c.clone().get_matches();
+        let res = Cli::from_arg_matches_mut(&mut matches).map_err(|err| err.format(c));
+        match res {
+            Ok(s) => s,
+            Err(e) => e.exit(),
+        }
+    };
+
     let bus: MultiQueue<J1939Packet> = MultiQueue::new();
-    let parse = &ConnectionDescriptor::parse();
-    let mut rp1210 = parse.connect(bus.clone())?;
-    let _thread = rp1210.run(None, parse.app_packetize)?;
+    let mut rp1210 = parse.connection.connect(bus.clone())?;
+    let _thread = rp1210.run(None, parse.connection.app_packetize)?;
     bus.iter_for(Duration::from_secs(60 * 60 * 24 * 7))
         .for_each(|p| println!("{}", p));
     Ok(())
