@@ -23,7 +23,6 @@ pub struct Cli {
     pub connection: ConnectionDescriptor,
 }
 #[derive(Args, Debug, Default, Clone)]
-#[command(after_help = "asdf")]
 pub struct ConnectionDescriptor {
     /// RP1210 Adapter Identifier
     #[arg(long, short('D'))]
@@ -86,7 +85,7 @@ fn main() -> Result<(), anyhow::Error> {
         .collect::<Vec<String>>()
         .join("\n");
 
-    // inline Command::parse() to override the after_help
+    // inline Command::parse() to override the usage with dynamic content
     let mut command = Cli::command();
     let mut usage = command.render_usage();
     usage.write_str(color_print::cstr!("\n\n<bold>RP1210 Devices:<bold>\n"))?;
