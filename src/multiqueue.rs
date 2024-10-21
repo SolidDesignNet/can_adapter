@@ -98,12 +98,9 @@ impl<T> MultiQueue<T>
 where
     T: Clone + Sync + Send + Display + 'static,
 {
-    fn print_item(p: T) {
-        println!("{}", p)
-    }
     /// Lazy man's debugging
     pub fn log(&self) -> JoinHandle<()> {
-        self.each(Self::print_item)
+        self.each(|p| println!("{}", p))
     }
 
     pub fn each(&self, func: fn(T)) -> JoinHandle<()> {

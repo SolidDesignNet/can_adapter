@@ -31,7 +31,11 @@ impl Rp1210 {
         })
     }
     /// background thread to read all packets into queue
-    pub fn run(&mut self, channel: Option<u8>,app_packetize:bool) -> Result<std::thread::JoinHandle<()>> {
+    pub fn run(
+        &mut self,
+        channel: Option<u8>,
+        _app_packetize: bool,
+    ) -> Result<std::thread::JoinHandle<()>> {
         let mut bus = self.bus.clone();
         let running = self.running.clone();
         let dev = self.device as u8;

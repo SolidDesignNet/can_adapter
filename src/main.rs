@@ -1,6 +1,6 @@
-use std::{default, fmt::Write, time::Duration};
+use std::{fmt::Write, time::Duration};
 
-use clap::{parser, Args, CommandFactory, FromArgMatches, Parser};
+use clap::{Args, CommandFactory, FromArgMatches, Parser};
 use multiqueue::MultiQueue;
 use packet::J1939Packet;
 
@@ -66,7 +66,7 @@ fn hex8(str: &str) -> Result<u8, std::num::ParseIntError> {
     u8::from_str_radix(str, 16)
 }
 
-fn main() -> Result<(), anyhow::Error> {
+pub fn main() -> Result<(), anyhow::Error> {
     let help = rp1210_parsing::list_all_products()
         .unwrap()
         .iter()
@@ -91,10 +91,9 @@ fn main() -> Result<(), anyhow::Error> {
     usage.write_str(color_print::cstr!("\n\n<bold>RP1210 Devices:<bold>\n"))?;
     usage.write_str(help.as_str())?;
     command = command.override_usage(usage);
-    let c = &mut command;
     let parse = {
-        let mut matches = c.clone().get_matches();
-        let res = Cli::from_arg_matches_mut(&mut matches).map_err(|err| err.format(c));
+        let mut matches = command.clone().get_matches();
+        let res = Cli::from_arg_matches_mut(&mut matches).map_err(|err| err.format(&mut command));
         match res {
             Ok(s) => s,
             Err(e) => e.exit(),
@@ -104,7 +103,6 @@ fn main() -> Result<(), anyhow::Error> {
     let bus: MultiQueue<J1939Packet> = MultiQueue::new();
     let mut rp1210 = parse.connection.connect(bus.clone())?;
     let _thread = rp1210.run(None, parse.connection.app_packetize)?;
-    bus.iter_for(Duration::from_secs(60 * 60 * 24 * 7))
-        .for_each(|p| println!("{}", p));
+    bus.iter_for(Duration::MAX).for_each(|p| println!("{}", p));
     Ok(())
 }
