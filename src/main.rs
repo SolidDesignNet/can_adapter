@@ -1,11 +1,12 @@
 use std::{fmt::Write, time::Duration};
 
 use clap::{Args, CommandFactory, FromArgMatches, Parser};
-use multiqueue::MultiQueue;
-use packet::J1939Packet;
+use common::Connection;
 
+pub mod common;
 pub mod multiqueue;
 pub mod packet;
+
 #[cfg_attr(
     not(all(target_pointer_width = "32", target_os = "windows")),
     path = "sim.rs"
@@ -48,16 +49,14 @@ pub struct ConnectionDescriptor {
 }
 
 impl ConnectionDescriptor {
-    pub fn connect(
-        &self,
-        bus: MultiQueue<packet::J1939Packet>,
-    ) -> Result<rp1210::Rp1210, anyhow::Error> {
+    pub fn connect(&self) -> Result<impl Connection, anyhow::Error> {
+        // FIXME don't assume RP1210.  Also support J2534
         rp1210::Rp1210::new(
             &self.adapter,
             self.device,
             &self.connection_string,
             self.source_address,
-            bus.clone(),
+            None,
         )
     }
 }
@@ -100,9 +99,9 @@ pub fn main() -> Result<(), anyhow::Error> {
         }
     };
 
-    let bus: MultiQueue<J1939Packet> = MultiQueue::new();
-    let mut rp1210 = parse.connection.connect(bus.clone())?;
-    let _thread = rp1210.run(None, parse.connection.app_packetize)?;
-    bus.iter_for(Duration::MAX).for_each(|p| println!("{}", p));
+    let rp1210 = parse.connection.connect()?;
+    rp1210
+        .iter_for(Duration::MAX)
+        .for_each(|p| println!("{}", p));
     Ok(())
 }

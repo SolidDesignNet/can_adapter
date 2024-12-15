@@ -1,5 +1,5 @@
 [package]
-name = "rp1210"
+name = "can_adapter"
 version = "0.2.1"
 edition = "2021"
 
@@ -8,12 +8,12 @@ name = "logger"
 path = "src/main.rs"
 
 [lib]
-name = "rp1210"
+name = "can_adapter"
 path = "src/main.rs"
 
 [dependencies]
-anyhow = "^1"
-libloading = "0.8.2"
-rust-ini = "0.21.0"
-clap = { version = "4.5.1", features = ["derive"] }
-color-print = { version = "0.3.6" }
+anyhow = "1.0.94"
+libloading = "0.8.6"
+rust-ini = "0.21.1"
+clap = { version = "4.5.23", features = ["derive"] }
+color-print = { version = "0.3.7" }
