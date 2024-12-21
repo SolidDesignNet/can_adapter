@@ -5,11 +5,11 @@ use std::thread::JoinHandle;
 use std::time::Duration;
 
 use crate::common::Connection;
-use crate::multiqueue::MultiQueue;
+use crate::multiqueue::{Bus, MultiQueue};
 use crate::packet::*;
 
-pub struct Rp1210 {
-    bus: MultiQueue<J1939Packet>,
+pub struct  Rp1210  {
+    bus: Box<dyn Bus<J1939Packet>>,
     running: Arc<AtomicBool>,
     thread: Option<JoinHandle<()>>,
 }
@@ -27,7 +27,7 @@ impl Rp1210 {
         let running = Arc::new(AtomicBool::new(false));
         let dev = device as u8;
         let rp1210 = Rp1210 {
-            bus: bus.clone(),
+            bus: bus.clone_bus(),
             running: running.clone(),
             thread: 
                 Some(std::thread::spawn(move || {
