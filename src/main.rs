@@ -54,9 +54,10 @@ impl ConnectionDescriptor {
         rp1210::Rp1210::new(
             &self.adapter,
             self.device,
+            None,
             &self.connection_string,
             self.source_address,
-            None,
+            false
         )
     }
 }
@@ -74,10 +75,10 @@ pub fn main() -> Result<(), anyhow::Error> {
                 color_print::cstr!("  <b>{}</> <b>{}</>"),
                 p.id, p.description
             ))
-            .chain(p.devices.iter().map(|p| {
+            .chain(p.devices.iter().map(|dev| {
                 format!(
                     color_print::cstr!("    --adapter <bold>{}</> --device <bold>{}</>: {}"),
-                    p.name, p.id, p.description
+                    p.id, dev.id, dev.description
                 )
             }))
         })
@@ -101,7 +102,7 @@ pub fn main() -> Result<(), anyhow::Error> {
 
     let rp1210 = parse.connection.connect()?;
     rp1210
-        .iter_for(Duration::MAX)
+        .iter_for(Duration::MAX / 2)
         .for_each(|p| println!("{}", p));
     Ok(())
 }
