@@ -11,27 +11,26 @@ use crate::packet::*;
 pub struct Rp1210 {
     bus: MultiQueue<J1939Packet>,
     running: Arc<AtomicBool>,
-    thread: JoinHandle<()>,
+    thread: Option<JoinHandle<()>>,
 }
 impl Rp1210 {
     #[deprecated(note = "Must be built with Win32 target to use RP1210 adapters.")]
     pub fn new(
         _id: &str,
         device: i16,
+        channel: Option<u8>,
         _connection_string: &str,
         _address: u8,
-        channel: Option<u8>,
+        _app_packetized: bool,
     ) -> Result<Rp1210> {
-        let bus = MultiQueue::new();
+        let mut bus = MultiQueue::new();
         let running = Arc::new(AtomicBool::new(false));
+        let dev = device as u8;
         let rp1210 = Rp1210 {
             bus: bus.clone(),
             running: running.clone(),
-            thread: {
-                let mut bus = bus.clone();
-                let running = running.clone();
-                let dev = device as u8;
-                std::thread::spawn(move || {
+            thread: 
+                Some(std::thread::spawn(move || {
                     running.store(true, Ordering::Relaxed);
                     let mut seq: u64 = u64::from_be_bytes([dev, 0, 0, 0, 0, 0, 0, 0]);
                     while running.load(Ordering::Relaxed) {
@@ -46,8 +45,8 @@ impl Rp1210 {
                         std::thread::sleep(Duration::from_millis(10));
                         seq = seq + 1;
                     }
-                })
-            },
+                }))
+            ,
         };
         Ok(rp1210)
     }
@@ -73,5 +72,6 @@ impl Connection for Rp1210 {
 impl Drop for Rp1210 {
     fn drop(&mut self) {
         self.running.store(false, Ordering::Relaxed);
+        let _ = self.thread.take().unwrap().join();
     }
 }

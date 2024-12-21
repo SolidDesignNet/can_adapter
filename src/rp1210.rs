@@ -27,7 +27,7 @@ pub struct Rp1210 {
     api: API,
     bus: MultiQueue<J1939Packet>,
     running: Arc<AtomicBool>,
-    join: JoinHandle<()>,
+    join: Option<JoinHandle<()>>,
 }
 #[derive(Debug)]
 struct API {
@@ -129,7 +129,7 @@ impl API {
 impl Drop for Rp1210 {
     fn drop(&mut self) {
         self.running.store(false, Relaxed);
-        //self.join.join();
+        self.join.take().unwrap().join();
     }
 }
 
@@ -160,7 +160,7 @@ impl Rp1210 {
             api,
             bus: bus.clone(),
             running: running.clone(),
-            join: std::thread::spawn(move || {
+            join: Some(std::thread::spawn(move || {
                 let mut buf: [u8; PACKET_SIZE] = [0; PACKET_SIZE];
                 let channel = channel.unwrap_or(0);
                 while running.load(Relaxed) {
@@ -184,7 +184,7 @@ impl Rp1210 {
                         std::hint::spin_loop()
                     }
                 }
-            }),
+            })),
         })
     }
 }

@@ -1,4 +1,7 @@
-use std::{fmt::Write, time::Duration};
+use std::{
+    fmt::Write,
+    time::Duration,
+};
 
 use clap::{Args, CommandFactory, FromArgMatches, Parser};
 use common::Connection;
@@ -57,7 +60,7 @@ impl ConnectionDescriptor {
             None,
             &self.connection_string,
             self.source_address,
-            false
+            false,
         )
     }
 }
@@ -102,7 +105,7 @@ pub fn main() -> Result<(), anyhow::Error> {
 
     let rp1210 = parse.connection.connect()?;
     rp1210
-        .iter_for(Duration::MAX / 2)
+        .iter_for(Duration::from_secs(60 * 60 * 24 * 30))
         .for_each(|p| println!("{}", p));
     Ok(())
 }
