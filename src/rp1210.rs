@@ -6,9 +6,11 @@ use anyhow::*;
 use libloading::os::windows::Symbol as WinSymbol;
 use libloading::*;
 use std::ffi::CString;
+use std::hint;
 use std::sync::atomic::Ordering::Relaxed;
 use std::sync::atomic::*;
 use std::sync::*;
+use std::thread;
 use std::thread::JoinHandle;
 use std::time::Duration;
 
@@ -22,10 +24,9 @@ type _VERSION = unsafe extern "stdcall" fn(i16, *const u8, i16, i16) -> i16;
 type GetErrorType = unsafe extern "stdcall" fn(i16, *const u8) -> i16;
 type ClientDisconnectType = unsafe extern "stdcall" fn(i16) -> i16;
 
-#[derive(Debug)]
 pub struct Rp1210 {
     api: API,
-    bus: MultiQueue<J1939Packet>,
+    bus: Box<dyn Bus<J1939Packet>>,
     running: Arc<AtomicBool>,
     join: Option<JoinHandle<()>>,
 }
@@ -129,7 +130,7 @@ impl API {
 impl Drop for Rp1210 {
     fn drop(&mut self) {
         self.running.store(false, Relaxed);
-        self.join.take().unwrap().join();
+        let _ = self.join.take().unwrap().join();
     }
 }
 
@@ -155,10 +156,11 @@ impl Rp1210 {
         let id = api.id;
 
         let running = Arc::new(AtomicBool::new(true));
-        let mut bus = PushBus::new();
+        //let mut bus = PushBus::new();
+        let mut bus = MultiQueue::new();
         Ok(Rp1210 {
             api,
-            bus: bus.clone(),
+            bus: bus.clone_bus(),
             running: running.clone(),
             join: Some(std::thread::spawn(move || {
                 let mut buf: [u8; PACKET_SIZE] = [0; PACKET_SIZE];
@@ -170,7 +172,7 @@ impl Rp1210 {
                             channel,
                             &buf[0..size as usize],
                             time_stamp_weight,
-                        ))
+                        ));
                     } else {
                         if size < 0 {
                             // read error
@@ -179,9 +181,9 @@ impl Rp1210 {
                             let msg = String::from_utf8_lossy(&buf[0..size]).to_string();
                             let driver = format!("{} {} {}", id, device, connection_string);
                             eprintln!("ERROR: {}: {}: {}", driver, code, msg,);
-                            std::thread::sleep(Duration::from_secs_f32(0.25))
+                            std::thread::sleep(Duration::from_millis(250))
                         }
-                        std::hint::spin_loop()
+                        std::thread::sleep(Duration::from_millis(1))
                     }
                 }
             })),
@@ -198,11 +200,11 @@ impl Connection for Rp1210 {
         send.map(|_| stream.find(move |p| p.data() == packet.data()).unwrap())
     }
 
-    fn push(&mut self, item: J1939Packet) {
-        self.bus.push(item);
+    fn iter_for(&mut self, duration: Duration) -> impl Iterator<Item = J1939Packet> {
+        self.bus.iter_for(duration)
     }
 
-    fn iter_for(&self, duration: Duration) -> impl Iterator<Item = J1939Packet> {
-        self.bus.iter_for(duration)
+    fn push(&mut self, item: J1939Packet) {
+        self.bus.push(item);
     }
 }
