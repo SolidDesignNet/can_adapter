@@ -155,7 +155,7 @@ impl Rp1210 {
         let id = api.id;
 
         let running = Arc::new(AtomicBool::new(true));
-        let mut bus = MultiQueue::new();
+        let mut bus = PushBus::new();
         Ok(Rp1210 {
             api,
             bus: bus.clone(),

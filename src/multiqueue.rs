@@ -1,5 +1,7 @@
-use std::option::*;
-use std::sync::*;
+use std::collections::VecDeque;
+use std::sync::Arc;
+use std::sync::Mutex;
+use std::sync::RwLock;
 use std::thread;
 use std::time::Duration;
 use std::time::Instant;
@@ -7,25 +9,22 @@ use std::time::Instant;
 /// Linked list data
 struct MqItem<T> {
     data: T,
-    next: MqNode<T>,
+    next: Arc<RwLock<Option<MqItem<T>>>>,
 }
 
-/// Linked list nodes
-type MqNode<T> = Arc<RwLock<Option<MqItem<T>>>>;
-
-pub trait Bus<T>:Send
+pub trait Bus<T>: Send
 where
     T: Clone,
 {
-    fn iter_for(&self, duration: Duration) -> Box<dyn Iterator<Item = T>>;
+    fn iter_for(&mut self, duration: Duration) -> Box<dyn Iterator<Item = T>>;
     fn push(&mut self, item: T);
-    fn clone_bus(&self)->Box<dyn Bus<T>>;
+    fn clone_bus(&self) -> Box<dyn Bus<T>>;
 }
 #[derive(Clone)]
 pub struct MultiQueue<T: Clone> {
     // shared head that always points to the empty Arc<RwLock>
-    // Yes, this seems like overkill, but we need to clone multiqueues to easily use them in threads, so this make cloning work easily.
-    head: Arc<RwLock<MqNode<T>>>,
+    // Yes, this seems like overkill, but we need to clone multiqueues to easily use them in threads, so this makes cloning work easily.
+    head: Arc<RwLock<Arc<RwLock<Option<MqItem<T>>>>>>,
 }
 
 impl<T: Clone> std::fmt::Debug for MultiQueue<T> {
@@ -38,7 +37,7 @@ impl<T: Clone> std::fmt::Debug for MultiQueue<T> {
 
 /// Iterator
 struct MqIter<T> {
-    head: MqNode<T>,
+    head: Arc<RwLock<Option<MqItem<T>>>>,
     until: Instant,
 }
 
@@ -83,7 +82,7 @@ impl<T> Bus<T> for MultiQueue<T>
 where
     T: 'static + Clone + Sync + Send,
 {
-    fn iter_for(&self, duration: Duration) -> Box<dyn Iterator<Item = T>> {
+    fn iter_for(&mut self, duration: Duration) -> Box<dyn Iterator<Item = T>> {
         Box::new(MqIter {
             head: self.head.read().unwrap().clone(),
             until: Instant::now() + duration,
@@ -101,8 +100,8 @@ where
         // update head to point to the new empty item.
         *head = empty;
     }
-    
-    fn clone_bus(&self)->Box<dyn Bus<T>> {
+
+    fn clone_bus(&self) -> Box<dyn Bus<T>> {
         Box::new(self.clone())
     }
 }
@@ -121,5 +120,79 @@ mod tests {
         assert_eq!("two", i.next().unwrap());
         assert_eq!("three", i.next().unwrap());
         assert_eq!(std::option::Option::None, i.next());
+    }
+}
+
+#[derive(Clone)]
+pub struct PushBus<T> {
+    iters: Arc<Mutex<Vec<PushBusIter<T>>>>,
+}
+impl<T> PushBus<T> {
+    pub fn new() -> Self {
+        Self {
+            iters: Arc::new(Mutex::new(Vec::new())),
+        }
+    }
+}
+
+#[derive(Clone)]
+struct PushBusIter<T> {
+    data: Arc<Mutex<VecDeque<T>>>,
+    iters: Arc<Mutex<Vec<PushBusIter<T>>>>,
+    end: Instant,
+}
+impl<T> Drop for PushBusIter<T> {
+    fn drop(&mut self) {
+        self.end = Instant::now() - Duration::from_secs(1);
+        self.iters.lock().unwrap().retain(|i| i.is_running());
+    }
+}
+impl<T> Iterator for PushBusIter<T> {
+    type Item = T;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        while self.is_running() {
+            let v = self.data.lock().unwrap().pop_front();
+            if v.is_some() {
+                return v;
+            }
+            thread::sleep(Duration::from_millis(1));
+        }
+        None
+    }
+}
+
+impl<T> PushBusIter<T> {
+    fn is_running(&self) -> bool {
+        Instant::now() <= self.end
+    }
+}
+impl<T: 'static + Send + Clone> Bus<T> for PushBus<T> {
+    fn iter_for(&mut self, duration: Duration) -> Box<dyn Iterator<Item = T>> {
+        let muti = PushBusIter {
+            data: Arc::new(Mutex::new(VecDeque::new())),
+            iters: self.iters.clone(),
+            end: Instant::now() + duration,
+        };
+        self.iters.lock().unwrap().push(muti.clone());
+        Box::new(muti)
+    }
+
+    fn push(&mut self, item: T) {
+        self.iters
+            .lock()
+            .unwrap()
+            .iter_mut()
+            .for_each(|i| i.data.lock().unwrap().push_back(item.clone()));
+    }
+
+    fn clone_bus(&self) -> Box<dyn Bus<T>> {
+        Box::new(self.clone())
+    }
+}
+
+impl<T: Clone + 'static> Clone for Box<dyn Bus<T>> {
+    fn clone(&self) -> Self {
+        self.clone_bus()
     }
 }

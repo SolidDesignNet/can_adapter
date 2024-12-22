@@ -103,7 +103,7 @@ pub fn main() -> Result<(), anyhow::Error> {
         }
     };
 
-    let rp1210 = parse.connection.connect()?;
+    let mut rp1210 = parse.connection.connect()?;
     rp1210
         .iter_for(Duration::from_secs(60 * 60 * 24 * 30))
         .for_each(|p| println!("{}", p));

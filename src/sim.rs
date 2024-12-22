@@ -5,7 +5,7 @@ use std::thread::JoinHandle;
 use std::time::Duration;
 
 use crate::common::Connection;
-use crate::multiqueue::{Bus, MultiQueue};
+use crate::multiqueue::{Bus, MultiQueue, PushBus};
 use crate::packet::*;
 
 pub struct  Rp1210  {
@@ -23,7 +23,7 @@ impl Rp1210 {
         _address: u8,
         _app_packetized: bool,
     ) -> Result<Rp1210> {
-        let mut bus = MultiQueue::new();
+        let mut bus = PushBus::new();
         let running = Arc::new(AtomicBool::new(false));
         let dev = device as u8;
         let rp1210 = Rp1210 {
@@ -60,7 +60,7 @@ impl Connection for Rp1210 {
         Ok(p)
     }
 
-    fn iter_for(&self, duration: Duration) -> impl Iterator<Item = J1939Packet> {
+    fn iter_for(&mut self, duration: Duration) -> impl Iterator<Item = J1939Packet> {
         self.bus.iter_for(duration)
     }
 
