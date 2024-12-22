@@ -5,6 +5,7 @@ use std::{
 
 use clap::{Args, CommandFactory, FromArgMatches, Parser};
 use common::Connection;
+use packet::J1939Packet;
 
 pub mod common;
 pub mod multiqueue;
@@ -104,6 +105,13 @@ pub fn main() -> Result<(), anyhow::Error> {
     };
 
     let mut rp1210 = parse.connection.connect()?;
+
+    let mut packets = rp1210.iter_for(Duration::from_secs(5));
+    rp1210.push(J1939Packet::new(2, 0x18EA00F9, &[0xEC, 0xFE, 0x00]));
+    packets
+        .find(|p| p.pgn() == 0xFEEC && p.source() == 0)
+        .map(|p| print!("VIN: {}", String::from_utf8(p.data.clone()).unwrap()));
+
     rp1210
         .iter_for(Duration::from_secs(60 * 60 * 24 * 30))
         .for_each(|p| println!("{}", p));

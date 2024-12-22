@@ -6,20 +6,15 @@ use std::thread;
 use std::time::Duration;
 use std::time::Instant;
 
-/// Linked list data
-struct MqItem<T> {
-    data: T,
-    next: Arc<RwLock<Option<MqItem<T>>>>,
-}
+use crate::common::Bus;
 
-pub trait Bus<T>: Send
-where
-    T: Clone,
-{
-    fn iter_for(&mut self, duration: Duration) -> Box<dyn Iterator<Item = T>>;
-    fn push(&mut self, item: T);
-    fn clone_bus(&self) -> Box<dyn Bus<T>>;
-}
+/// CAN bus representation.  Typical use is to
+/// ```
+/// let response = bus.iter_for(TIMEOUT);
+/// bus.push(REQUEST);
+/// response.filter(|p|CONDITION).if_pre
+/// ```
+
 #[derive(Clone)]
 pub struct MultiQueue<T: Clone> {
     // shared head that always points to the empty Arc<RwLock>
@@ -27,18 +22,16 @@ pub struct MultiQueue<T: Clone> {
     head: Arc<RwLock<Arc<RwLock<Option<MqItem<T>>>>>>,
 }
 
-impl<T: Clone> std::fmt::Debug for MultiQueue<T> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("MultiQueue")
-            //.field("head", &self.head)
-            .finish()
-    }
-}
-
 /// Iterator
 struct MqIter<T> {
     head: Arc<RwLock<Option<MqItem<T>>>>,
     until: Instant,
+}
+
+/// Linked list data
+struct MqItem<T> {
+    data: T,
+    next: Arc<RwLock<Option<MqItem<T>>>>,
 }
 
 impl<T> Iterator for MqIter<T>
@@ -78,6 +71,7 @@ where
         })
     }
 }
+
 impl<T> Bus<T> for MultiQueue<T>
 where
     T: 'static + Clone + Sync + Send,
@@ -122,6 +116,9 @@ mod tests {
         assert_eq!(std::option::Option::None, i.next());
     }
 }
+
+/// PushBusIter is an experiment to use array based queues per thread, instead of a shared Linked List.
+/// Most CPU time is used reading the RP1210 adapter, so the Bus isn't a significant contributer to CPU usage.
 
 #[derive(Clone)]
 pub struct PushBus<T> {

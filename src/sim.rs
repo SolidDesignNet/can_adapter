@@ -4,11 +4,11 @@ use std::sync::*;
 use std::thread::JoinHandle;
 use std::time::Duration;
 
-use crate::common::Connection;
-use crate::multiqueue::{Bus, MultiQueue, PushBus};
+use crate::common::{Bus, Connection};
+use crate::multiqueue::PushBus;
 use crate::packet::*;
 
-pub struct  Rp1210  {
+pub struct Rp1210 {
     bus: Box<dyn Bus<J1939Packet>>,
     running: Arc<AtomicBool>,
     thread: Option<JoinHandle<()>>,
@@ -29,24 +29,22 @@ impl Rp1210 {
         let rp1210 = Rp1210 {
             bus: bus.clone_bus(),
             running: running.clone(),
-            thread: 
-                Some(std::thread::spawn(move || {
-                    running.store(true, Ordering::Relaxed);
-                    let mut seq: u64 = u64::from_be_bytes([dev, 0, 0, 0, 0, 0, 0, 0]);
-                    while running.load(Ordering::Relaxed) {
-                        bus.push(J1939Packet::new_packet(
-                            channel.unwrap_or(0),
-                            6,
-                            0xFFFF,
-                            0,
-                            0xF9,
-                            &seq.to_be_bytes(),
-                        ));
-                        std::thread::sleep(Duration::from_millis(10));
-                        seq = seq + 1;
-                    }
-                }))
-            ,
+            thread: Some(std::thread::spawn(move || {
+                running.store(true, Ordering::Relaxed);
+                let mut seq: u64 = u64::from_be_bytes([dev, 0, 0, 0, 0, 0, 0, 0]);
+                while running.load(Ordering::Relaxed) {
+                    bus.push(J1939Packet::new_packet(
+                        channel.unwrap_or(0),
+                        6,
+                        0xFFFF,
+                        0,
+                        0xF9,
+                        &seq.to_be_bytes(),
+                    ));
+                    std::thread::sleep(Duration::from_millis(10));
+                    seq = seq + 1;
+                }
+            })),
         };
         Ok(rp1210)
     }
@@ -60,7 +58,7 @@ impl Connection for Rp1210 {
         Ok(p)
     }
 
-    fn iter_for(&mut self, duration: Duration) -> impl Iterator<Item = J1939Packet> {
+    fn iter_for(&mut self, duration: Duration) -> Box<dyn Iterator<Item = J1939Packet>> {
         self.bus.iter_for(duration)
     }
 
