@@ -1,11 +1,13 @@
 use std::{fmt::Write, time::Duration};
 
 use clap::{Args, CommandFactory, FromArgMatches, Parser};
-use multiqueue::MultiQueue;
+use common::Connection;
 use packet::J1939Packet;
 
-pub mod multiqueue;
+pub mod bus;
+pub mod common;
 pub mod packet;
+
 #[cfg_attr(
     not(all(target_pointer_width = "32", target_os = "windows")),
     path = "sim.rs"
@@ -48,16 +50,15 @@ pub struct ConnectionDescriptor {
 }
 
 impl ConnectionDescriptor {
-    pub fn connect(
-        &self,
-        bus: MultiQueue<packet::J1939Packet>,
-    ) -> Result<rp1210::Rp1210, anyhow::Error> {
+    pub fn connect(&self) -> Result<impl Connection, anyhow::Error> {
+        // FIXME don't assume RP1210.  Also support J2534
         rp1210::Rp1210::new(
             &self.adapter,
             self.device,
+            None,
             &self.connection_string,
             self.source_address,
-            bus.clone(),
+            false,
         )
     }
 }
@@ -67,6 +68,7 @@ fn hex8(str: &str) -> Result<u8, std::num::ParseIntError> {
 }
 
 pub fn main() -> Result<(), anyhow::Error> {
+    // parse command
     let help = rp1210_parsing::list_all_products()
         .unwrap()
         .iter()
@@ -75,10 +77,10 @@ pub fn main() -> Result<(), anyhow::Error> {
                 color_print::cstr!("  <b>{}</> <b>{}</>"),
                 p.id, p.description
             ))
-            .chain(p.devices.iter().map(|p| {
+            .chain(p.devices.iter().map(|dev| {
                 format!(
                     color_print::cstr!("    --adapter <bold>{}</> --device <bold>{}</>: {}"),
-                    p.name, p.id, p.description
+                    p.id, dev.id, dev.description
                 )
             }))
         })
@@ -100,9 +102,47 @@ pub fn main() -> Result<(), anyhow::Error> {
         }
     };
 
-    let bus: MultiQueue<J1939Packet> = MultiQueue::new();
-    let mut rp1210 = parse.connection.connect(bus.clone())?;
-    let _thread = rp1210.run(None, parse.connection.app_packetize)?;
-    bus.iter_for(Duration::MAX).for_each(|p| println!("{}", p));
+    // open the adapter
+    let mut rp1210 = parse.connection.connect()?;
+
+    // request VIN from ECM
+    // start collecting packets
+    let mut packets = rp1210.iter_for(Duration::from_secs(5));
+    // send request for VIN
+    rp1210.push(J1939Packet::new(1, 0x18EA00F9, &[0xEC, 0xFE, 0x00]));
+    // filter for ECM result
+    packets
+        .find(|p| p.pgn() == 0xFEEC && p.source() == 0)
+        // log the VINs
+        .map(|p| {
+            print!(
+                "ECM {:02X} VIN: {}\n{}",
+                p.source(),
+                String::from_utf8(p.data.clone()).unwrap(),
+                p
+            )
+        });
+
+    // request VIN from Broadcast
+    // start collecting packets
+    let packets = rp1210.iter_for(Duration::from_secs(5));
+    // send request for VIN
+    rp1210.push(J1939Packet::new(1, 0x18EAFFF9, &[0xEC, 0xFE, 0x00]));
+    // filter for all results
+    packets
+        .filter(|p| p.pgn() == 0xFEEC)
+        // log the VINs
+        .for_each(|p| {
+            print!(
+                "SA: {:02X} VIN: {}",
+                p.source(),
+                String::from_utf8(p.data.clone()).unwrap()
+            )
+        });
+
+    // log everything for the next 30 days
+    rp1210
+        .iter_for(Duration::from_secs(60 * 60 * 24 * 30))
+        .for_each(|p| println!("{}", p));
     Ok(())
 }
