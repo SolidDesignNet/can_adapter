@@ -58,7 +58,7 @@ impl Connection for Rp1210 {
         Ok(p)
     }
 
-    fn iter_for(&mut self, duration: Duration) -> Box<dyn Iterator<Item = J1939Packet>> {
+    fn iter_for(&mut self, duration: Duration) -> Box<dyn Iterator<Item = J1939Packet>+Send+Sync> {
         self.bus.iter_for(duration)
     }
 

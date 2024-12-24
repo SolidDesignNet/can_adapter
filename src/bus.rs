@@ -7,12 +7,12 @@ use std::time::Duration;
 use std::time::Instant;
 
 /// represents the bus.  This is used by the adapter.  Currently is a custom multiqueue (multi headed linked list), but may use a publish subscribe sytem in the future.
-pub(crate) trait Bus<T>: Send
+pub(crate) trait Bus<T>: Send + Sync
 where
     T: Clone,
 {
     /// used to read packets from the bus for a duration (typically considered a response timeout).
-    fn iter_for(&mut self, duration: Duration) -> Box<dyn Iterator<Item = T>>;
+    fn iter_for(&mut self, duration: Duration) -> Box<dyn Iterator<Item = T> + Sync + Send>;
     fn push(&mut self, item: T);
     fn clone_bus(&self) -> Box<dyn Bus<T>>;
 }
@@ -78,7 +78,7 @@ impl<T> Bus<T> for MultiQueue<T>
 where
     T: 'static + Clone + Sync + Send,
 {
-    fn iter_for(&mut self, duration: Duration) -> Box<dyn Iterator<Item = T>> {
+    fn iter_for(&mut self, duration: Duration) -> Box<dyn Iterator<Item = T> + Sync + Send> {
         Box::new(MqIter {
             head: self.head.read().unwrap().clone(),
             until: Instant::now() + duration,
@@ -167,7 +167,7 @@ impl<T> PushBusIter<T> {
     }
 }
 impl<T: 'static + Send + Clone> Bus<T> for PushBus<T> {
-    fn iter_for(&mut self, duration: Duration) -> Box<dyn Iterator<Item = T>> {
+    fn iter_for(&mut self, duration: Duration) -> Box<dyn Iterator<Item = T> + Sync + Send> {
         let muti = PushBusIter {
             data: Arc::new(Mutex::new(VecDeque::new())),
             iters: self.iters.clone(),

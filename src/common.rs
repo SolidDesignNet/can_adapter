@@ -19,11 +19,14 @@ use crate::packet::J1939Packet;
 ///    .for_each(|p| println!("{}", p));
 /// ```
 
-pub trait Connection {
+pub trait Connection: Send + Sync {
     // Send packet on CAN adapter
     fn send(&mut self, packet: &J1939Packet) -> Result<J1939Packet, anyhow::Error>;
     // read packets
-    fn iter_for(&mut self, duration: Duration) -> Box<dyn Iterator<Item = J1939Packet>>;
+    fn iter_for(
+        &mut self,
+        duration: Duration,
+    ) -> Box<dyn Iterator<Item = J1939Packet> + Sync + Send>;
     // echo packet to application, but not CAN adapter
     fn push(&mut self, item: J1939Packet);
 }
