@@ -1,6 +1,6 @@
 [package]
 name = "can_adapter"
-version = "0.2.1"
+version = "0.2.2"
 edition = "2021"
 license = "MIT"
 description = "Library to load CAN adapters typically used to diagnose vehicles."
