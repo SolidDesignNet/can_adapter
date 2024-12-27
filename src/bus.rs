@@ -39,7 +39,7 @@ struct PushBusIter<T> {
 }
 
 impl<T> Iterator for PushBusIter<T> {
-    /// That's right, Option<Option<Packet>>
+    /// That's right, `Option<Option<Packet>>`
     /// None is closed
     /// Some(None) is an empty poll() of the adapter
     /// Some(Packet) is a CAN packet

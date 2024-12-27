@@ -7,16 +7,21 @@ use crate::packet::J1939Packet;
 /// Typical use is to log or interogate a vehicle network:
 ///
 /// ```
-/// let mut rp1210 = parse.connection.connect()?;
-/// let packets = rp1210.iter_for(Duration::from_secs(2));
-/// rp1210.send(&J1939Packet::new(1, 0x18EAFFF9, &[0xEC, 0xFE, 0x00]))?;
-/// packets
-///   .filter(|p| p.pgn() == 0xFEEC )
-///   .for_each(|p| println!("VIN: {} packet: {}",String::from_utf8(p.data().to_owned()).unwrap(),p));
-///
-///  rp1210
-///    .iter_for(Duration::from_secs(60 * 60 * 24 * 30))
-///    .for_each(|p| println!("{}", p));
+/// use std::time::{Duration, Instant};
+/// use can_adapter::connection::Connection;
+/// use can_adapter::packet::J1939Packet;
+/// fn vin(rp1210: & mut dyn Connection) ->Result<(),anyhow::Error> {
+///   let packets = rp1210.iter_for(Duration::from_secs(2));
+///   rp1210.send(&J1939Packet::new(1, 0x18EAFFF9, &[0xEC, 0xFE, 0x00]))?;
+///   packets
+///     .filter(|p| p.pgn() == 0xFEEC )
+///     .for_each(|p| println!("VIN: {} packet: {}",String::from_utf8(p.data().to_owned()).unwrap(),p));
+///  
+///    rp1210
+///      .iter_for(Duration::from_secs(60 * 60 * 24 * 30))
+///      .for_each(|p| println!("{}", p));
+///    Ok(())
+/// }
 /// ```
 
 pub trait Connection: Send + Sync {
