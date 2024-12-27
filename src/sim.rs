@@ -1,17 +1,16 @@
 use anyhow::*;
 use std::sync::atomic::*;
 use std::sync::*;
-use std::thread::JoinHandle;
+use std::thread::Builder;
 use std::time::Duration;
 
-use crate::common::Connection;
 use crate::bus::{Bus, PushBus};
+use crate::connection::Connection;
 use crate::packet::*;
-
+#[derive(Clone)]
 pub struct Rp1210 {
-    bus: Box<dyn Bus<J1939Packet>>,
+    bus: Box<PushBus<J1939Packet>>,
     running: Arc<AtomicBool>,
-    thread: Option<JoinHandle<()>>,
 }
 impl Rp1210 {
     #[deprecated(note = "Must be built with Win32 target to use RP1210 adapters.")]
@@ -23,30 +22,34 @@ impl Rp1210 {
         _address: u8,
         _app_packetized: bool,
     ) -> Result<Rp1210> {
-        let mut bus = PushBus::new();
+        let bus = PushBus::new();
         let running = Arc::new(AtomicBool::new(false));
         let dev = device as u8;
-        let rp1210 = Rp1210 {
-            bus: bus.clone_bus(),
-            running: running.clone(),
-            thread: Some(std::thread::spawn(move || {
+        {
+            let running = running.clone();
+            let mut bus = bus.clone();
+            Builder::new().name("rp1210".into()).spawn(move || {
                 running.store(true, Ordering::Relaxed);
                 let mut seq: u64 = u64::from_be_bytes([dev, 0, 0, 0, 0, 0, 0, 0]);
                 while running.load(Ordering::Relaxed) {
-                    bus.push(J1939Packet::new_packet(
+                    let packet = J1939Packet::new_packet(
                         channel.unwrap_or(0),
                         6,
                         0xFFFF,
                         0,
                         0xF9,
                         &seq.to_be_bytes(),
-                    ));
-                    std::thread::sleep(Duration::from_millis(10));
+                    );
+                    bus.push(packet);
+                    std::thread::sleep(Duration::from_millis(100));
                     seq = seq + 1;
                 }
-            })),
-        };
-        Ok(rp1210)
+            })?;
+        }
+        Ok(Rp1210 {
+            bus: Box::new(bus.clone()),
+            running: running.clone(),
+        })
     }
 }
 impl Connection for Rp1210 {
@@ -58,18 +61,18 @@ impl Connection for Rp1210 {
         Ok(p)
     }
 
-    fn iter_for(&mut self, duration: Duration) -> Box<dyn Iterator<Item = J1939Packet>+Send+Sync> {
-        self.bus.iter_for(duration)
+    fn iter(&self) -> Box<dyn Iterator<Item = Option<J1939Packet>> + Send + Sync> {
+        self.bus.iter()
     }
-
-    fn push(&mut self, item: J1939Packet) {
-        self.bus.push(item);
+    fn clone_connection(&self) -> Box<dyn Connection> {
+        Box::new(self.clone())
     }
 }
 
 impl Drop for Rp1210 {
     fn drop(&mut self) {
         self.running.store(false, Ordering::Relaxed);
-        let _ = self.thread.take().unwrap().join();
+        self.bus.close();
+        //let _ = self.thread.take().unwrap().join();
     }
 }

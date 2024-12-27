@@ -1,11 +1,14 @@
-use std::{fmt::Write, time::Duration};
+use std::{
+    fmt::Write,
+    time::Duration,
+};
 
 use clap::{Args, CommandFactory, FromArgMatches, Parser};
-use common::Connection;
+use connection::Connection;
 use packet::J1939Packet;
 
 pub mod bus;
-pub mod common;
+pub mod connection;
 pub mod packet;
 
 #[cfg_attr(
@@ -109,7 +112,7 @@ pub fn main() -> Result<(), anyhow::Error> {
     // start collecting packets
     let mut packets = rp1210.iter_for(Duration::from_secs(5));
     // send request for VIN
-    rp1210.push(J1939Packet::new(1, 0x18EA00F9, &[0xEC, 0xFE, 0x00]));
+    rp1210.send(&J1939Packet::new(1, 0x18EA00F9, &[0xEC, 0xFE, 0x00]))?;
     // filter for ECM result
     packets
         .find(|p| p.pgn() == 0xFEEC && p.source() == 0)
@@ -125,9 +128,10 @@ pub fn main() -> Result<(), anyhow::Error> {
 
     // request VIN from Broadcast
     // start collecting packets
-    let packets = rp1210.iter_for(Duration::from_secs(5));
+    let packets =  rp1210.iter_for(Duration::from_secs(5));
+
     // send request for VIN
-    rp1210.push(J1939Packet::new(1, 0x18EAFFF9, &[0xEC, 0xFE, 0x00]));
+    rp1210.send(&J1939Packet::new(1, 0x18EAFFF9, &[0xEC, 0xFE, 0x00]))?;
     // filter for all results
     packets
         .filter(|p| p.pgn() == 0xFEEC)
@@ -146,3 +150,4 @@ pub fn main() -> Result<(), anyhow::Error> {
         .for_each(|p| println!("{}", p));
     Ok(())
 }
+

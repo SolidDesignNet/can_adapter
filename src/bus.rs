@@ -1,10 +1,9 @@
 use std::collections::VecDeque;
+use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use std::sync::Mutex;
-use std::sync::RwLock;
 use std::thread;
 use std::time::Duration;
-use std::time::Instant;
 
 /// represents the bus.  This is used by the adapter.  Currently is a custom multiqueue (multi headed linked list), but may use a publish subscribe sytem in the future.
 pub(crate) trait Bus<T>: Send + Sync
@@ -12,118 +11,17 @@ where
     T: Clone,
 {
     /// used to read packets from the bus for a duration (typically considered a response timeout).
-    fn iter_for(&mut self, duration: Duration) -> Box<dyn Iterator<Item = T> + Sync + Send>;
+    fn iter(&self) -> Box<dyn Iterator<Item = Option<T>> + Send + Sync>;
     fn push(&mut self, item: T);
     fn clone_bus(&self) -> Box<dyn Bus<T>>;
-}
-
-#[derive(Clone)]
-pub(crate) struct MultiQueue<T: Clone> {
-    // shared head that always points to the empty Arc<RwLock>
-    // Yes, this seems like overkill, but we need to clone multiqueues to easily use them in threads, so this makes cloning work easily.
-    head: Arc<RwLock<Arc<RwLock<Option<MqItem<T>>>>>>,
-}
-
-/// Iterator
-struct MqIter<T> {
-    head: Arc<RwLock<Option<MqItem<T>>>>,
-    until: Instant,
-}
-
-/// Linked list data
-struct MqItem<T> {
-    data: T,
-    next: Arc<RwLock<Option<MqItem<T>>>>,
-}
-
-impl<T> Iterator for MqIter<T>
-where
-    T: Clone + Sync + Send,
-{
-    type Item = T;
-    fn next(&mut self) -> std::option::Option<<Self as std::iter::Iterator>::Item> {
-        let mut o = None;
-        while o.is_none() && Instant::now() < self.until {
-            thread::sleep(Duration::from_millis(1));
-            o = self
-                .head
-                .read()
-                .unwrap()
-                .as_ref()
-                .map(|i| (i.data.clone(), i.next.clone()));
-        }
-        o.map(|clones| {
-            self.head = clones.1;
-            clones.0
-        })
-    }
-}
-
-#[allow(dead_code)]
-impl<T> MultiQueue<T>
-where
-    T: Clone + Sync + Send,
-{
-    pub fn new() -> Box<dyn Bus<T>>
-    where
-        T: 'static + Clone + Sync + Send,
-    {
-        Box::new(MultiQueue {
-            head: Arc::new(RwLock::new(Arc::new(RwLock::new(None)))),
-        })
-    }
-}
-
-impl<T> Bus<T> for MultiQueue<T>
-where
-    T: 'static + Clone + Sync + Send,
-{
-    fn iter_for(&mut self, duration: Duration) -> Box<dyn Iterator<Item = T> + Sync + Send> {
-        Box::new(MqIter {
-            head: self.head.read().unwrap().clone(),
-            until: Instant::now() + duration,
-        })
-    }
-
-    fn push(&mut self, item: T) {
-        let empty = Arc::new(RwLock::new(None));
-        let mut head = self.head.write().unwrap();
-        // add the new item.
-        *head.write().unwrap() = Some(MqItem {
-            data: item,
-            next: empty.clone(),
-        });
-        // update head to point to the new empty item.
-        *head = empty;
-    }
-
-    fn clone_bus(&self) -> Box<dyn Bus<T>> {
-        Box::new(self.clone())
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn simple() {
-        let mut q = MultiQueue::new();
-        q.push("one");
-        let mut i = q.iter_for(Duration::from_millis(200));
-        q.push("two");
-        q.push("three");
-        assert_eq!("two", i.next().unwrap());
-        assert_eq!("three", i.next().unwrap());
-        assert_eq!(std::option::Option::None, i.next());
-    }
+    fn close(&mut self);
 }
 
 /// PushBusIter is an experiment to use array based queues per thread, instead of a shared Linked List.
 /// Most CPU time is used reading the RP1210 adapter, so the Bus isn't a significant contributer to CPU usage.
 
 #[derive(Clone)]
-pub(crate) struct PushBus<T> {
+pub struct PushBus<T> {
     iters: Arc<Mutex<Vec<PushBusIter<T>>>>,
 }
 impl<T> PushBus<T> {
@@ -137,44 +35,36 @@ impl<T> PushBus<T> {
 #[derive(Clone)]
 struct PushBusIter<T> {
     data: Arc<Mutex<VecDeque<T>>>,
-    iters: Arc<Mutex<Vec<PushBusIter<T>>>>,
-    end: Instant,
+    running: Arc<AtomicBool>,
 }
-impl<T> Drop for PushBusIter<T> {
-    fn drop(&mut self) {
-        self.end = Instant::now() - Duration::from_secs(1);
-        self.iters.lock().unwrap().retain(|i| i.is_running());
-    }
-}
-impl<T> Iterator for PushBusIter<T> {
-    type Item = T;
 
+impl<T> Iterator for PushBusIter<T> {
+    /// That's right, Option<Option<Packet>>
+    /// None is closed
+    /// Some(None) is an empty poll() of the adapter
+    /// Some(Packet) is a CAN packet
+    type Item = Option<T>;
     fn next(&mut self) -> Option<Self::Item> {
-        while self.is_running() {
-            let v = self.data.lock().unwrap().pop_front();
-            if v.is_some() {
-                return v;
-            }
+        if !self.running.load(std::sync::atomic::Ordering::Relaxed) {
+            return None;
+        }
+        let v = self.data.lock().unwrap().pop_front();
+        if v.is_none() {
             thread::sleep(Duration::from_millis(1));
         }
-        None
+        Some(v)
     }
 }
 
-impl<T> PushBusIter<T> {
-    fn is_running(&self) -> bool {
-        Instant::now() <= self.end
-    }
-}
 impl<T: 'static + Send + Clone> Bus<T> for PushBus<T> {
-    fn iter_for(&mut self, duration: Duration) -> Box<dyn Iterator<Item = T> + Sync + Send> {
-        let muti = PushBusIter {
+    fn iter(&self) -> Box<dyn Iterator<Item = Option<T>> + Send + Sync> {
+        let x = PushBusIter {
             data: Arc::new(Mutex::new(VecDeque::new())),
-            iters: self.iters.clone(),
-            end: Instant::now() + duration,
+            //iters: self.iters.clone(),
+            running: Arc::new(AtomicBool::new(true)),
         };
-        self.iters.lock().unwrap().push(muti.clone());
-        Box::new(muti)
+        self.iters.lock().unwrap().push(x.clone());
+        Box::new(x)
     }
 
     fn push(&mut self, item: T) {
@@ -187,6 +77,14 @@ impl<T: 'static + Send + Clone> Bus<T> for PushBus<T> {
 
     fn clone_bus(&self) -> Box<dyn Bus<T>> {
         Box::new(self.clone())
+    }
+
+    fn close(&mut self) {
+        self.iters
+            .lock()
+            .unwrap()
+            .iter_mut()
+            .for_each(|i| i.running.store(false, std::sync::atomic::Ordering::Relaxed));
     }
 }
 

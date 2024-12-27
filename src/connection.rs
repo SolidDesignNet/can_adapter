@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crate::packet::J1939Packet;
 
@@ -22,11 +22,22 @@ use crate::packet::J1939Packet;
 pub trait Connection: Send + Sync {
     // Send packet on CAN adapter
     fn send(&mut self, packet: &J1939Packet) -> Result<J1939Packet, anyhow::Error>;
-    // read packets
-    fn iter_for(
-        &mut self,
-        duration: Duration,
-    ) -> Box<dyn Iterator<Item = J1939Packet> + Sync + Send>;
-    // echo packet to application, but not CAN adapter
-    fn push(&mut self, item: J1939Packet);
+    // read packets. Some(None) does not indicate end of iterator. Some(None) indicates that a poll() returned None.
+    fn iter(&self) -> Box<dyn Iterator<Item = Option<J1939Packet>> + Send + Sync>;
+
+    fn iter_for(&self, duration: Duration) -> Box<dyn Iterator<Item = J1939Packet> + Send + Sync> {
+        let end = Instant::now() + duration;
+        Box::new(
+            self.iter()
+                .map_while(move |o| if Instant::now() > end { None } else { o }),
+        )
+    }
+
+    fn clone_connection(&self) -> Box<dyn Connection>;
+}
+
+impl Clone for Box<dyn Connection> {
+    fn clone(&self) -> Self {
+        self.clone_connection()
+    }
 }

@@ -26,7 +26,7 @@ type ClientDisconnectType = unsafe extern "stdcall" fn(i16) -> i16;
 
 pub struct Rp1210 {
     api: API,
-    bus: Box<dyn Bus<J1939Packet>>,
+    bufer: VecDeque<J1939Packet>,
     running: Arc<AtomicBool>,
     join: Option<JoinHandle<()>>,
 }
