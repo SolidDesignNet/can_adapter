@@ -105,7 +105,7 @@ pub fn main() -> Result<(), anyhow::Error> {
     // open the adapter
     let mut rp1210 = parse.connection.connect()?;
 
-    // request VIN from ECM
+    {// request VIN from ECM
     // start collecting packets
     let mut packets = rp1210.iter_for(Duration::from_secs(2));
     // send request for VIN
@@ -119,13 +119,13 @@ pub fn main() -> Result<(), anyhow::Error> {
             print!(
                     "ECM {:02X} VIN: {}\n{}",
                     p.source(),
-                    String::from_utf8(p.data.clone()).unwrap(),
+                    String::from_utf8(p.data().into()).unwrap(),
                     p
                 )
             },
         );
-
-    // request VIN from Broadcast
+    }
+{    // request VIN from Broadcast
     // start collecting packets
     let packets = rp1210.iter_for(Duration::from_secs(5));
 
@@ -136,13 +136,13 @@ pub fn main() -> Result<(), anyhow::Error> {
         .filter(|p| p.pgn() == 0xFEEC)
         // log the VINs
         .for_each(|p| {
-            print!(
+            println!(
                 "SA: {:02X} VIN: {}",
                 p.source(),
-                String::from_utf8(p.data.clone()).unwrap()
+                String::from_utf8(p.data().into()).unwrap()
             )
         });
-
+    }
     // log everything for the next 30 days
     rp1210
         .iter_for(Duration::from_secs(60 * 60 * 24 * 30))

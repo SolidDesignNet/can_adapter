@@ -6,7 +6,7 @@ use std::thread;
 use std::time::Duration;
 
 /// represents the bus.  This is used by the adapter.  Currently is a custom multiqueue (multi headed linked list), but may use a publish subscribe sytem in the future.
-pub(crate) trait Bus<T>: Send + Sync {
+pub(crate) trait Bus<T:'static>: Send + Sync {
     /// used to read packets from the bus
     fn iter(&self) -> Box<dyn Iterator<Item = Option<T>> + Send + Sync>;
     fn push(&mut self, item: Option<T>);
@@ -88,7 +88,7 @@ impl<T: Send + Sync + 'static + Clone> Bus<T> for PushBus<T> {
     }
 }
 
-impl<T> Clone for Box<dyn Bus<T>> {
+impl<T:'static> Clone for Box<dyn Bus<T>> {
     fn clone(&self) -> Self {
         self.clone_bus()
     }

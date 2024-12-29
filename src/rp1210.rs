@@ -1,18 +1,16 @@
-use crate::common::Connection;
-use crate::multiqueue::*;
+use crate::bus::*;
+use crate::connection::Connection;
 use crate::packet::*;
 use crate::rp1210_parsing;
 use anyhow::*;
 use libloading::os::windows::Symbol as WinSymbol;
 use libloading::*;
 use std::ffi::CString;
-use std::hint;
 use std::sync::atomic::Ordering::Relaxed;
 use std::sync::atomic::*;
 use std::sync::*;
-use std::thread;
-use std::thread::JoinHandle;
 use std::time::Duration;
+use std::time::Instant;
 
 pub const PACKET_SIZE: usize = 1600;
 
@@ -26,9 +24,8 @@ type ClientDisconnectType = unsafe extern "stdcall" fn(i16) -> i16;
 
 pub struct Rp1210 {
     api: API,
-    bufer: VecDeque<J1939Packet>,
+    bus: Box<PushBus<J1939Packet>>,
     running: Arc<AtomicBool>,
-    join: Option<JoinHandle<()>>,
 }
 #[derive(Debug)]
 struct API {
@@ -131,7 +128,6 @@ impl Drop for Rp1210 {
     fn drop(&mut self) {
         self.running.store(false, Relaxed);
         self.bus.close();
-        //let _ = self.join.take().unwrap().join();
     }
 }
 
@@ -157,57 +153,54 @@ impl Rp1210 {
         let id = api.id;
 
         let running = Arc::new(AtomicBool::new(true));
-        //let mut bus = PushBus::new();
-        let mut bus = MultiQueue::new();
-        Ok(Rp1210 {
+        let mut bus = PushBus::new();
+        let rp1210 = Rp1210 {
             api,
-            bus: bus.clone_bus(),
+            bus: Box::new(bus.clone()),
             running: running.clone(),
-            join: Some(std::thread::spawn(move || {
-                let mut buf: [u8; PACKET_SIZE] = [0; PACKET_SIZE];
-                let channel = channel.unwrap_or(0);
-                while running.load(Relaxed) {
-                    let size = unsafe { read(id, buf.as_mut_ptr(), PACKET_SIZE as i16, 0) };
-                    if size > 0 {
-                        bus.push(J1939Packet::new_rp1210(
-                            channel,
-                            &buf[0..size as usize],
-                            time_stamp_weight,
-                        ));
+        };
+        std::thread::spawn(move || {
+            let mut buf: [u8; PACKET_SIZE] = [0; PACKET_SIZE];
+            let channel = channel.unwrap_or(0);
+            while running.load(Relaxed) {
+                let size = unsafe { read(id, buf.as_mut_ptr(), PACKET_SIZE as i16, 0) };
+                if size > 0 {
+                    bus.push(Some(J1939Packet::new_rp1210(
+                        channel,
+                        &buf[0..size as usize],
+                        time_stamp_weight,
+                    )));
+                } else {
+                    if size < 0 {
+                        // read error
+                        let code = -size;
+                        let size = unsafe { (get_error_fn)(code, buf.as_mut_ptr()) } as usize;
+                        let msg = String::from_utf8_lossy(&buf[0..size]).to_string();
+                        let driver = format!("{} {} {}", id, device, connection_string);
+                        eprintln!("ERROR: {}: {}: {}", driver, code, msg,);
+                        std::thread::sleep(Duration::from_millis(250));
                     } else {
-                        if size < 0 {
-                            // read error
-                            let code = -size;
-                            let size = unsafe { (get_error_fn)(code, buf.as_mut_ptr()) } as usize;
-                            let msg = String::from_utf8_lossy(&buf[0..size]).to_string();
-                            let driver = format!("{} {} {}", id, device, connection_string);
-                            eprintln!("ERROR: {}: {}: {}", driver, code, msg,);
-                            std::thread::sleep(Duration::from_millis(250));
-                        } else {
-                            std::thread::sleep(Duration::from_millis(1));
-                        }
+                        std::thread::sleep(Duration::from_millis(1));
                     }
-                    bus.push(None)
                 }
-            })),
-        })
+                bus.push(None)
+            }
+        });
+        Ok(rp1210)
     }
 }
 
 impl Connection for Rp1210 {
     /// Send packet and return packet echoed back from adapter
     fn send(&mut self, packet: &J1939Packet) -> Result<J1939Packet> {
-        let mut stream = self.bus.iter_for(Duration::from_secs(2));
-        let send = self.api.send(packet);
+        let end = Instant::now() + Duration::from_secs(2);
+        let stream = self.bus.iter().take_while(|_| Instant::now() < end);
+        let sent = self.api.send(packet);
         // FIXME needs better error handling
-        send.map(|_| stream.find(move |p| p.data() == packet.data()).unwrap())
+        sent.map(|_| stream.flat_map(|o|o).find(move |p| p.data() == packet.data()).unwrap())
     }
 
-    fn iter_for(&mut self, duration: Duration) -> impl Iterator<Item = J1939Packet> {
-        self.bus.iter_for(duration)
-    }
-
-    fn push(&mut self, item: J1939Packet) {
-        self.bus.push(item);
+    fn iter(&self) -> Box<dyn Iterator<Item = Option<J1939Packet>> + Send + Sync> {
+        self.bus.iter()
     }
 }
