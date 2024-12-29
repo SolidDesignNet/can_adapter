@@ -5,7 +5,7 @@ pub struct Packet {
     pub data: Vec<u8>,
 }
 
-#[derive(Default, Debug, Clone)]
+#[derive(Default,  Clone)]
 pub struct J1939Packet {
     pub packet: Packet,
     pub tx: bool,
@@ -20,7 +20,11 @@ impl Deref for J1939Packet {
         &self.packet
     }
 }
-
+impl Debug for J1939Packet {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result {
+        Display::fmt(&self, f)
+    }
+}
 impl Display for J1939Packet {
     fn fmt(&self, f: &mut Formatter) -> Result {
         write!(

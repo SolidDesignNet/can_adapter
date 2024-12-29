@@ -6,13 +6,10 @@ use std::thread;
 use std::time::Duration;
 
 /// represents the bus.  This is used by the adapter.  Currently is a custom multiqueue (multi headed linked list), but may use a publish subscribe sytem in the future.
-pub(crate) trait Bus<T>: Send + Sync
-where
-    T: Clone,
-{
-    /// used to read packets from the bus for a duration (typically considered a response timeout).
+pub(crate) trait Bus<T>: Send + Sync {
+    /// used to read packets from the bus
     fn iter(&self) -> Box<dyn Iterator<Item = Option<T>> + Send + Sync>;
-    fn push(&mut self, item: T);
+    fn push(&mut self, item: Option<T>);
     fn clone_bus(&self) -> Box<dyn Bus<T>>;
     fn close(&mut self);
 }
@@ -34,7 +31,7 @@ impl<T> PushBus<T> {
 
 #[derive(Clone)]
 struct PushBusIter<T> {
-    data: Arc<Mutex<VecDeque<T>>>,
+    data: Arc<Mutex<VecDeque<Option<T>>>>,
     running: Arc<AtomicBool>,
 }
 
@@ -46,28 +43,31 @@ impl<T> Iterator for PushBusIter<T> {
     type Item = Option<T>;
     fn next(&mut self) -> Option<Self::Item> {
         if !self.running.load(std::sync::atomic::Ordering::Relaxed) {
+            // done
             return None;
         }
         let v = self.data.lock().unwrap().pop_front();
-        if v.is_none() {
-            thread::sleep(Duration::from_millis(1));
+        if v.is_some() {
+            return v;
         }
-        Some(v)
+        // this means there was an empty response from poll()
+        // sleep to avoid busy spinning
+        thread::sleep(Duration::from_millis(1));
+        return Some(None);
     }
 }
 
-impl<T: 'static + Send + Clone> Bus<T> for PushBus<T> {
+impl<T: Send + Sync + 'static + Clone> Bus<T> for PushBus<T> {
     fn iter(&self) -> Box<dyn Iterator<Item = Option<T>> + Send + Sync> {
         let x = PushBusIter {
             data: Arc::new(Mutex::new(VecDeque::new())),
-            //iters: self.iters.clone(),
             running: Arc::new(AtomicBool::new(true)),
         };
         self.iters.lock().unwrap().push(x.clone());
         Box::new(x)
     }
 
-    fn push(&mut self, item: T) {
+    fn push(&mut self, item: Option<T>) {
         self.iters
             .lock()
             .unwrap()
@@ -88,7 +88,7 @@ impl<T: 'static + Send + Clone> Bus<T> for PushBus<T> {
     }
 }
 
-impl<T: Clone + 'static> Clone for Box<dyn Bus<T>> {
+impl<T> Clone for Box<dyn Bus<T>> {
     fn clone(&self) -> Self {
         self.clone_bus()
     }

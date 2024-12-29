@@ -130,7 +130,8 @@ impl API {
 impl Drop for Rp1210 {
     fn drop(&mut self) {
         self.running.store(false, Relaxed);
-        let _ = self.join.take().unwrap().join();
+        self.bus.close();
+        //let _ = self.join.take().unwrap().join();
     }
 }
 
@@ -186,6 +187,7 @@ impl Rp1210 {
                             std::thread::sleep(Duration::from_millis(1));
                         }
                     }
+                    bus.push(None)
                 }
             })),
         })

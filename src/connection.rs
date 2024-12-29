@@ -27,22 +27,20 @@ use crate::packet::J1939Packet;
 pub trait Connection: Send + Sync {
     // Send packet on CAN adapter
     fn send(&mut self, packet: &J1939Packet) -> Result<J1939Packet, anyhow::Error>;
+
     // read packets. Some(None) does not indicate end of iterator. Some(None) indicates that a poll() returned None.
     fn iter(&self) -> Box<dyn Iterator<Item = Option<J1939Packet>> + Send + Sync>;
-
-    fn iter_for(&self, duration: Duration) -> Box<dyn Iterator<Item = J1939Packet> + Send + Sync> {
-        let end = Instant::now() + duration;
-        Box::new(
-            self.iter()
-                .map_while(move |o| if Instant::now() > end { None } else { o }),
-        )
+    
+    fn iter_until(&self, end: Instant) -> Box<dyn Iterator<Item = J1939Packet> + Send + Sync> {
+        Box::new(self.iter().filter(|o| o.is_some()).map_while(move |o| {
+            if Instant::now() > end {
+                None
+            } else {
+                o
+            }
+        }))
     }
-
-    fn clone_connection(&self) -> Box<dyn Connection>;
-}
-
-impl Clone for Box<dyn Connection> {
-    fn clone(&self) -> Self {
-        self.clone_connection()
+    fn iter_for(&self, duration: Duration) -> Box<dyn Iterator<Item = J1939Packet> + Send + Sync> {
+        self.iter_until(Instant::now() + duration)
     }
 }

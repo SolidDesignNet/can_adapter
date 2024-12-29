@@ -7,7 +7,7 @@ use std::time::Duration;
 use crate::bus::{Bus, PushBus};
 use crate::connection::Connection;
 use crate::packet::*;
-#[derive(Clone)]
+
 pub struct Rp1210 {
     bus: Box<PushBus<J1939Packet>>,
     running: Arc<AtomicBool>,
@@ -40,7 +40,7 @@ impl Rp1210 {
                         0xF9,
                         &seq.to_be_bytes(),
                     );
-                    bus.push(packet);
+                    bus.push(Some(packet));
                     std::thread::sleep(Duration::from_millis(100));
                     seq = seq + 1;
                 }
@@ -52,20 +52,18 @@ impl Rp1210 {
         })
     }
 }
+
 impl Connection for Rp1210 {
     /// Send packet and return packet echoed back from adapter
     fn send(&mut self, packet: &J1939Packet) -> Result<J1939Packet> {
         let p = packet.clone();
         p.time();
-        self.bus.push(p.clone());
+        self.bus.push(Some(p.clone()));
         Ok(p)
     }
 
     fn iter(&self) -> Box<dyn Iterator<Item = Option<J1939Packet>> + Send + Sync> {
         self.bus.iter()
-    }
-    fn clone_connection(&self) -> Box<dyn Connection> {
-        Box::new(self.clone())
     }
 }
 

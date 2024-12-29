@@ -1,7 +1,4 @@
-use std::{
-    fmt::Write,
-    time::Duration,
-};
+use std::{fmt::Write, time::Duration};
 
 use clap::{Args, CommandFactory, FromArgMatches, Parser};
 use connection::Connection;
@@ -110,25 +107,27 @@ pub fn main() -> Result<(), anyhow::Error> {
 
     // request VIN from ECM
     // start collecting packets
-    let mut packets = rp1210.iter_for(Duration::from_secs(5));
+    let mut packets = rp1210.iter_for(Duration::from_secs(2));
     // send request for VIN
     rp1210.send(&J1939Packet::new(1, 0x18EA00F9, &[0xEC, 0xFE, 0x00]))?;
+
     // filter for ECM result
     packets
         .find(|p| p.pgn() == 0xFEEC && p.source() == 0)
-        // log the VINs
+        // log the VIN
         .map(|p| {
             print!(
-                "ECM {:02X} VIN: {}\n{}",
-                p.source(),
-                String::from_utf8(p.data.clone()).unwrap(),
-                p
-            )
-        });
+                    "ECM {:02X} VIN: {}\n{}",
+                    p.source(),
+                    String::from_utf8(p.data.clone()).unwrap(),
+                    p
+                )
+            },
+        );
 
     // request VIN from Broadcast
     // start collecting packets
-    let packets =  rp1210.iter_for(Duration::from_secs(5));
+    let packets = rp1210.iter_for(Duration::from_secs(5));
 
     // send request for VIN
     rp1210.send(&J1939Packet::new(1, 0x18EAFFF9, &[0xEC, 0xFE, 0x00]))?;
@@ -150,4 +149,3 @@ pub fn main() -> Result<(), anyhow::Error> {
         .for_each(|p| println!("{}", p));
     Ok(())
 }
-
