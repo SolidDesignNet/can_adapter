@@ -2,7 +2,7 @@ use anyhow::*;
 use std::sync::atomic::*;
 use std::sync::*;
 use std::thread::Builder;
-use std::time::Duration;
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use crate::bus::{Bus, PushBus};
 use crate::connection::Connection;
@@ -33,11 +33,12 @@ impl Rp1210 {
                 let mut seq: u64 = u64::from_be_bytes([dev, 0, 0, 0, 0, 0, 0, 0]);
                 while running.load(Ordering::Relaxed) {
                     let packet = J1939Packet::new_packet(
+                        Some(now()),
                         channel.unwrap_or(0),
                         6,
-                        0xFFFF,
+                        0xFEF1,
                         0,
-                        0xF9,
+                        0x0,
                         &seq.to_be_bytes(),
                     );
                     bus.push(Some(packet));
@@ -56,15 +57,24 @@ impl Rp1210 {
 impl Connection for Rp1210 {
     /// Send packet and return packet echoed back from adapter
     fn send(&mut self, packet: &J1939Packet) -> Result<J1939Packet> {
-        let p = packet.clone();
-        p.time();
-        self.bus.push(Some(p.clone()));
-        Ok(p)
+        let mut packet =
+            J1939Packet::new_packet(Some(now()), packet.channel(), packet.priority(), packet.pgn(),packet.dest(), packet.source(),packet.data());
+        self.bus.push(Some(packet.clone()));
+        Ok(packet)
     }
 
     fn iter(&self) -> Box<dyn Iterator<Item = Option<J1939Packet>> + Send + Sync> {
         self.bus.iter()
     }
+}
+
+fn now() -> u32 {
+    let start = SystemTime::now();
+    let since_the_epoch = start
+        .duration_since(UNIX_EPOCH)
+        .expect("Time went backwards")
+        .as_millis();
+    since_the_epoch as u32
 }
 
 impl Drop for Rp1210 {

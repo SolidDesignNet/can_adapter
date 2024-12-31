@@ -5,7 +5,7 @@ pub struct Packet {
     pub data: Vec<u8>,
 }
 
-#[derive(Default,  Clone)]
+#[derive(Default, Clone)]
 pub struct J1939Packet {
     pub packet: Packet,
     pub tx: bool,
@@ -71,10 +71,10 @@ impl Packet {
 
 impl J1939Packet {
     #[allow(dead_code)]
-    pub fn new_rp1210(channel: u8, data: &[u8], time_stamp_weight: f64) -> J1939Packet {
+    pub fn new_rp1210(tx: bool, channel: u8, data: &[u8], time_stamp_weight: f64) -> J1939Packet {
         J1939Packet {
             packet: Packet::new_rp1210(data),
-            tx: false,
+            tx,
             channel,
             time_stamp_weight,
         }
@@ -86,6 +86,7 @@ impl J1939Packet {
 
     #[allow(dead_code)]
     pub fn new_packet(
+        time: Option<u32>,
         channel: u8,
         priority: u8,
         pgn: u32,
@@ -95,6 +96,7 @@ impl J1939Packet {
     ) -> J1939Packet {
         let da = if pgn >= 0xF000 { 0 } else { da };
         Self::new(
+            time,
             channel,
             ((priority as u32) << 24)
                 | (pgn << 8)
@@ -106,17 +108,31 @@ impl J1939Packet {
 
     // FIXME use a RP1210 encoder/decoder!
     #[allow(dead_code)]
-    pub fn new(channel: u8, head: u32, data: &[u8]) -> J1939Packet {
+    pub fn new(time: Option<u32>, channel: u8, head: u32, data: &[u8]) -> J1939Packet {
         let pgn = 0xFFFF & (head >> 8);
         let da = if pgn < 0xF000 { 0xFF & pgn } else { 0 } as u8;
         let hb = head.to_be_bytes();
-        let buf = [&[hb[2], hb[1], hb[0] & 0x3, hb[0] >> 2, hb[3], da], data].concat();
+        let mut buf = [&[hb[2], hb[1], hb[0] & 0x3, hb[0] >> 2, hb[3], da], data].concat();
+        if time.is_some() {
+            buf = [&time.unwrap().to_be_bytes()[..], &[0xFF], &buf].concat();
+        }
         J1939Packet {
             packet: Packet::new_rp1210(&buf),
-            tx: true,
+            tx: time.is_none(),
             channel,
-            time_stamp_weight: 0.0,
+            time_stamp_weight: 1.0,
         }
+    }
+
+    pub fn to_rp1210_rx(&self) -> Vec<u8> {
+        if self.tx {
+            [&[0, 0, 0, 0, 0][..], &*self.data].concat()
+        } else {
+            self.data.clone()
+        }
+    }
+    pub fn to_rp1210_tx(&self) -> Vec<u8> {
+        self.data[self.offset()..].into()
     }
 
     pub fn time(&self) -> f64 {
@@ -152,10 +168,13 @@ impl J1939Packet {
             | ((self.data[1 + self.offset()] as u32 & 0xFF) << 8)
             | (self.data[self.offset()] as u32 & 0xFF);
         if pgn < 0xF000 {
-            let destination = self.data[5 + self.offset()] as u32;
-            pgn |= destination;
+            pgn |= self.dest() as u32;
         }
         pgn
+    }
+
+    pub fn dest(&self) -> u8 {
+        self.data[5 + self.offset()]
     }
 
     pub fn priority(&self) -> u8 {
@@ -203,15 +222,25 @@ mod tests {
     fn test_j1939packet_display() {
         assert_eq!(
             "      0.0000 1 18FFAAFA [3] 01 02 03 (TX)",
-            J1939Packet::new(1, 0x18FFAAFA, &[1, 2, 3]).to_string()
+            J1939Packet::new(None, 1, 0x18FFAAFA, &[1, 2, 3]).to_string()
+        );
+        assert_eq!(
+            "      0.0000 1 18FFAAFA [3] 01 02 03 (TX)",
+            J1939Packet::new(Some(555), 1, 0x18FFAAFA, &[1, 2, 3]).to_string()
         );
         assert_eq!(
             "      0.0000 2 18FFAAF9 [8] 01 02 03 04 05 06 07 08 (TX)",
-            J1939Packet::new(2, 0x18FFAAF9, &[1, 2, 3, 4, 5, 6, 7, 8]).to_string()
+            J1939Packet::new(None, 2, 0x18FFAAF9, &[1, 2, 3, 4, 5, 6, 7, 8]).to_string()
         );
         assert_eq!(
             "      0.0000 3 18FFAAFB [8] FF 00 FF 00 FF 00 FF 00 (TX)",
-            J1939Packet::new(3, 0x18FFAAFB, &[0xFF, 00, 0xFF, 00, 0xFF, 00, 0xFF, 00]).to_string()
+            J1939Packet::new(
+                None,
+                3,
+                0x18FFAAFB,
+                &[0xFF, 00, 0xFF, 00, 0xFF, 00, 0xFF, 00]
+            )
+            .to_string()
         );
     }
 }

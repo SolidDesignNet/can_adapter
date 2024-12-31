@@ -9,11 +9,11 @@ pub mod connection;
 pub mod packet;
 
 #[cfg_attr(
-    not(all(target_pointer_width = "32", target_os = "windows")),
+    not(all(target_os = "windows")),
     path = "sim.rs"
 )]
 #[cfg_attr(
-    all(target_pointer_width = "32", target_os = "windows"),
+    all(target_os = "windows"),
     path = "rp1210.rs"
 )]
 pub mod rp1210;
@@ -109,7 +109,7 @@ pub fn main() -> Result<(), anyhow::Error> {
     // start collecting packets
     let mut packets = rp1210.iter_for(Duration::from_secs(2));
     // send request for VIN
-    rp1210.send(&J1939Packet::new(1, 0x18EA00F9, &[0xEC, 0xFE, 0x00]))?;
+    rp1210.send(&J1939Packet::new(None,1, 0x18EA00F9, &[0xEC, 0xFE, 0x00]))?;
 
     // filter for ECM result
     packets
@@ -130,7 +130,7 @@ pub fn main() -> Result<(), anyhow::Error> {
     let packets = rp1210.iter_for(Duration::from_secs(5));
 
     // send request for VIN
-    rp1210.send(&J1939Packet::new(1, 0x18EAFFF9, &[0xEC, 0xFE, 0x00]))?;
+    rp1210.send(&J1939Packet::new(None,1, 0x18EAFFF9, &[0xEC, 0xFE, 0x00]))?;
     // filter for all results
     packets
         .filter(|p| p.pgn() == 0xFEEC)
