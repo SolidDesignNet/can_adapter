@@ -6,7 +6,7 @@ use std::thread;
 use std::time::Duration;
 
 /// represents the bus.  This is used by the adapter.  Currently is a custom multiqueue (multi headed linked list), but may use a publish subscribe sytem in the future.
-pub(crate) trait Bus<T:'static>: Send + Sync {
+pub trait Bus<T:'static>: Send + Sync {
     /// used to read packets from the bus
     fn iter(&self) -> Box<dyn Iterator<Item = Option<T>> + Send + Sync>;
     fn push(&mut self, item: Option<T>);
@@ -30,7 +30,7 @@ impl<T> PushBus<T> {
 }
 
 #[derive(Clone)]
-struct PushBusIter<T> {
+pub struct PushBusIter<T> {
     data: Arc<Mutex<VecDeque<Option<T>>>>,
     running: Arc<AtomicBool>,
 }

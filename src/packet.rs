@@ -9,8 +9,8 @@ pub struct Packet {
 pub struct J1939Packet {
     pub packet: Packet,
     pub tx: bool,
-    channel: u8,
-    time_stamp_weight: f64,
+    pub channel: u8,
+    pub time_stamp_weight: f64,
 }
 
 impl Deref for J1939Packet {
@@ -120,7 +120,21 @@ impl J1939Packet {
             packet: Packet::new_rp1210(&buf),
             tx: time.is_none(),
             channel,
-            time_stamp_weight: 1.0,
+            time_stamp_weight: 1000.0,
+        }
+    }
+
+    pub fn new_socketcan(time: u32, tx: bool, head: u32, data: &[u8]) -> J1939Packet {
+        let pgn = 0xFFFF & (head >> 8);
+        let da = if pgn < 0xF000 { 0xFF & pgn } else { 0 } as u8;
+        let hb = head.to_be_bytes();
+        let mut buf = [&[hb[2], hb[1], hb[0] & 0x3, hb[0] >> 2, hb[3], da], data].concat();
+        buf = [&time.to_be_bytes()[..], &[0x00], &buf].concat();
+        J1939Packet {
+            packet: Packet::new_rp1210(&buf),
+            tx,
+            channel: 0,
+            time_stamp_weight: 1000.0,
         }
     }
 
