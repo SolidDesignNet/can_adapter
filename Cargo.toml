@@ -7,7 +7,7 @@ description = "Library to load CAN adapters typically used to diagnose vehicles.
 homepage = "https://github.com/SolidDesignNet/rp1210-rs"
 repository = "https://github.com/SolidDesignNet/rp1210-rs"
 readme = "README.md"
-keywords = ["rp1210","rp1210a","j2534","CAN","j1939"]
+keywords = ["rp1210", "rp1210a", "j2534", "CAN", "j1939"]
 
 [[bin]]
 name = "logger"
@@ -23,3 +23,4 @@ libloading = "0.8.6"
 rust-ini = "0.21.1"
 clap = { version = "4.5.23", features = ["derive"] }
 color-print = { version = "0.3.7" }
+socketcan = { version = "3.5.0", features = ["enumerate"] }

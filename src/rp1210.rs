@@ -3,6 +3,9 @@ use crate::connection::Connection;
 use crate::packet::*;
 use crate::rp1210_parsing;
 use anyhow::*;
+#[cfg(not(windows))]
+use libloading::os::unix::Symbol as WinSymbol;
+#[cfg(windows)]
 use libloading::os::windows::Symbol as WinSymbol;
 use libloading::*;
 use std::ffi::CString;
@@ -119,7 +122,19 @@ impl API {
         Ok(())
     }
     fn send(&self, packet: &J1939Packet) -> Result<i16> {
-        let buf = &packet.packet.data;
+        let pgn = packet.pgn().to_be_bytes();
+        let buf = [&[
+            pgn[0],
+            pgn[1],
+            pgn[2],
+            packet.priority(),
+            packet.source(),
+            if packet.pgn() < 0xF000 {
+                packet.pgn() as u8
+            } else {
+                0
+            },
+        ], packet.data()].concat();
         self.verify_return(unsafe { (self.send_fn)(self.id, buf.as_ptr(), buf.len() as i16, 0, 0) })
     }
 }
@@ -136,20 +151,16 @@ impl Rp1210 {
     pub fn new(
         id: &str,
         device: i16,
-        channel: Option<u8>,
         connection_string: &str,
         address: u8,
-        app_packetized: bool,
+        app_packetize: bool,
     ) -> Result<Rp1210> {
         let time_stamp_weight = rp1210_parsing::time_stamp_weight(id)?;
 
         let mut api = API::new(id)?;
         let read = *api.read_fn;
         let get_error_fn = *api.get_error_fn;
-        let connection_string = channel
-            .map(|c| format!("{};Channel={}", connection_string, c))
-            .unwrap_or(connection_string.to_owned());
-        api.client_connect(device, connection_string.as_str(), address, app_packetized)?;
+        api.client_connect(device, connection_string, address, app_packetize)?;
         let id = api.id;
 
         let running = Arc::new(AtomicBool::new(true));
@@ -159,13 +170,16 @@ impl Rp1210 {
             bus: Box::new(bus.clone()),
             running: running.clone(),
         };
+
+        let connection_string = connection_string.to_string();
         std::thread::spawn(move || {
             let mut buf: [u8; PACKET_SIZE] = [0; PACKET_SIZE];
-            let channel = channel.unwrap_or(0);
+            let channel = 0; // FIXME channel.unwrap_or(0);
             while running.load(Relaxed) {
                 let size = unsafe { read(id, buf.as_mut_ptr(), PACKET_SIZE as i16, 0) };
                 if size > 0 {
                     bus.push(Some(J1939Packet::new_rp1210(
+                        false,
                         channel,
                         &buf[0..size as usize],
                         time_stamp_weight,
@@ -194,10 +208,16 @@ impl Connection for Rp1210 {
     /// Send packet and return packet echoed back from adapter
     fn send(&mut self, packet: &J1939Packet) -> Result<J1939Packet> {
         let end = Instant::now() + Duration::from_secs(2);
+        // FIXMEiter_unti
         let stream = self.bus.iter().take_while(|_| Instant::now() < end);
         let sent = self.api.send(packet);
         // FIXME needs better error handling
-        sent.map(|_| stream.flat_map(|o|o).find(move |p| p.data() == packet.data()).unwrap())
+        sent.map(|_| {
+            stream
+                .flat_map(|o| o)
+                .find(move |p| p.data() == packet.data())
+                .unwrap()
+        })
     }
 
     fn iter(&self) -> Box<dyn Iterator<Item = Option<J1939Packet>> + Send + Sync> {

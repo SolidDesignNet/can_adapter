@@ -2,6 +2,11 @@ use std::fmt::Display;
 
 use anyhow::*;
 
+use crate::{
+    connection::{Connection, ConnectionFactory, DeviceDescriptor, ProtocolDescriptor},
+    rp1210::Rp1210,
+};
+
 #[derive(Debug)]
 pub struct Rp1210Device {
     pub id: i16,
@@ -13,6 +18,40 @@ pub struct Rp1210Product {
     pub id: String,
     pub description: String,
     pub devices: Vec<Rp1210Device>,
+}
+
+struct Rp1210Factory {
+    id: String,
+    device: i16,
+    connection_string: String,
+    address: u8,
+    app_packetize: bool,
+    name: String,
+}
+impl Display for Rp1210Factory {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.name)
+    }
+}
+impl ConnectionFactory for Rp1210Factory {
+    // FIXME should be impl From<Rp1210Factory> for Rp1210
+    fn new(&self) -> Result<Box<dyn crate::connection::Connection>, anyhow::Error> {
+        Ok(Box::new(Rp1210::new(
+            &self.id,
+            self.device,
+            &self.connection_string,
+            self.address,
+            self.app_packetize,
+        )?) as Box<dyn Connection>)
+    }
+
+    fn command_line(&self) -> String {
+        color_print::cformat!("rp1210 {} {}", self.id, self.device)
+    }
+    
+    fn name(&self) -> String {
+        self.name.to_string()
+    }
 }
 
 impl Display for Rp1210Device {
@@ -115,7 +154,11 @@ fn list_devices_for_prod(id: &str) -> Result<(String, Vec<Rp1210Device>)> {
                     .unwrap_or(false)
         })
         .map(|(_, properties)| Rp1210Device {
-            id: properties.get("DeviceID").unwrap_or("0").parse().unwrap_or(-1),
+            id: properties
+                .get("DeviceID")
+                .unwrap_or("0")
+                .parse()
+                .unwrap_or(-1),
             name: properties
                 .get("DeviceName")
                 .unwrap_or("Unknown")
@@ -129,7 +172,7 @@ fn list_devices_for_prod(id: &str) -> Result<(String, Vec<Rp1210Device>)> {
     println!("  {}.ini parsing in {} ms", id, start.elapsed().as_millis());
     let description = ini
         .section(Some("VendorInformation"))
-        .and_then(|s|s.get("Name"))
+        .and_then(|s| s.get("Name"))
         .unwrap_or_default()
         .to_string();
     Ok((description, rtn))
@@ -151,4 +194,30 @@ mod tests {
         list_all_products()?;
         Ok(())
     }
+}
+
+pub(crate) fn list_all() -> Result<ProtocolDescriptor, anyhow::Error> {
+    Ok(ProtocolDescriptor {
+        name: "RP1210".into(),
+        devices: list_all_products()?
+            .iter()
+            .map(|p| DeviceDescriptor {
+                name: p.description.clone(),
+                connections: p
+                    .devices
+                    .iter()
+                    .map(|d| {
+                        Box::new(Rp1210Factory {
+                            id: p.id.clone(),
+                            device: d.id,
+                            connection_string: "J1939:Baud=Auto".into(),
+                            address: 0xF9,
+                            app_packetize: false,
+                            name: d.description.clone(),
+                        }) as Box<dyn ConnectionFactory>
+                    })
+                    .collect(),
+            })
+            .collect(),
+    })
 }

@@ -1,25 +1,15 @@
-use std::{fmt::*, ops::Deref};
-
-#[derive(Default, Debug, Clone)]
-pub struct Packet {
-    pub data: Vec<u8>,
-}
+use std::fmt::*;
 
 #[derive(Default, Clone)]
 pub struct J1939Packet {
-    pub packet: Packet,
-    pub tx: bool,
-    pub channel: u8,
-    pub time_stamp_weight: f64,
+    id: u32,
+    payload: Vec<u8>,
+    tx: bool,
+    channel: u8,
+    time_stamp_weight: f64,
+    time: u32,
 }
 
-impl Deref for J1939Packet {
-    type Target = Packet;
-
-    fn deref(&self) -> &Self::Target {
-        &self.packet
-    }
-}
 impl Debug for J1939Packet {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result {
         Display::fmt(&self, f)
@@ -35,7 +25,7 @@ impl Display for J1939Packet {
             self.header(),
             self.len(),
             self.data_str(),
-            if self.echo() { " (TX)" } else { "" }
+            if self.tx { " (TX)" } else { "" }
         )
     }
 }
@@ -48,43 +38,34 @@ fn as_hex(data: &[u8]) -> String {
     s[1..].to_string()
 }
 
-impl Display for Packet {
-    fn fmt(&self, f: &mut Formatter) -> Result {
-        write!(
-            f,
-            "{}",
-            self.data
-                .iter()
-                .fold(String::new(), |a, &n| a + &n.to_string() + ", ")
-        )
-    }
-}
-
-impl Packet {
-    #[allow(dead_code)]
-    pub fn new_rp1210(data: &[u8]) -> Packet {
-        Packet {
-            data: data.to_vec(),
-        }
-    }
-}
-
 impl J1939Packet {
-    #[allow(dead_code)]
     pub fn new_rp1210(tx: bool, channel: u8, data: &[u8], time_stamp_weight: f64) -> J1939Packet {
+        let (time, data) = if tx {
+            (u32::from_be_bytes(data[0..4].try_into().expect("")), &data[5..])
+        } else {
+            (0, &data[0..])
+        };
+        let payload: Vec<u8> = data[4..].into();
+        let priority = data[0] as u32;
+        let pgn = u32::from_be_bytes([0, data[1], data[2], data[3]]);
+        let sa = data[4] as u32;
         J1939Packet {
-            packet: Packet::new_rp1210(data),
+            id: (priority << 27) | (pgn << 8) | sa,
+            payload,
             tx,
             channel,
             time_stamp_weight,
+            time,
         }
     }
 
     pub fn len(&self) -> usize {
-        self.data.len() - 6 - self.offset()
+        self.payload.len()
+    }
+    pub fn time(&self) -> u32 {
+        self.time
     }
 
-    #[allow(dead_code)]
     pub fn new_packet(
         time: Option<u32>,
         channel: u8,
@@ -106,81 +87,34 @@ impl J1939Packet {
         )
     }
 
-    // FIXME use a RP1210 encoder/decoder!
-    #[allow(dead_code)]
-    pub fn new(time: Option<u32>, channel: u8, head: u32, data: &[u8]) -> J1939Packet {
-        let pgn = 0xFFFF & (head >> 8);
-        let da = if pgn < 0xF000 { 0xFF & pgn } else { 0 } as u8;
-        let hb = head.to_be_bytes();
-        let mut buf = [&[hb[2], hb[1], hb[0] & 0x3, hb[0] >> 2, hb[3], da], data].concat();
-        if time.is_some() {
-            buf = [&time.unwrap().to_be_bytes()[..], &[0xFF], &buf].concat();
-        }
+    pub fn new(time: Option<u32>, channel: u8, id: u32, payload: &[u8]) -> J1939Packet {
         J1939Packet {
-            packet: Packet::new_rp1210(&buf),
+            id,
+            payload: payload.into(),
             tx: time.is_none(),
             channel,
             time_stamp_weight: 1000.0,
+            time: time.unwrap_or(0u32),
         }
     }
 
-    pub fn new_socketcan(time: u32, tx: bool, head: u32, data: &[u8]) -> J1939Packet {
-        let pgn = 0xFFFF & (head >> 8);
-        let da = if pgn < 0xF000 { 0xFF & pgn } else { 0 } as u8;
-        let hb = head.to_be_bytes();
-        let mut buf = [&[hb[2], hb[1], hb[0] & 0x3, hb[0] >> 2, hb[3], da], data].concat();
-        buf = [&time.to_be_bytes()[..], &[0x00], &buf].concat();
+    pub fn new_socketcan(time: u32, tx: bool, id: u32, payload: &[u8]) -> J1939Packet {
         J1939Packet {
-            packet: Packet::new_rp1210(&buf),
+            id,
+            payload: payload.into(),
             tx,
             channel: 0,
             time_stamp_weight: 1000.0,
+            time,
         }
-    }
-
-    pub fn to_rp1210_rx(&self) -> Vec<u8> {
-        if self.tx {
-            [&[0, 0, 0, 0, 0][..], &*self.data].concat()
-        } else {
-            self.data.clone()
-        }
-    }
-    pub fn to_rp1210_tx(&self) -> Vec<u8> {
-        self.data[self.offset()..].into()
-    }
-
-    pub fn time(&self) -> f64 {
-        if self.tx {
-            0.0
-        } else {
-            let bytes = &self.data[0..4];
-            u32::from_be_bytes(bytes.try_into().unwrap()) as f64
-                * 0.000001 // convert to s
-                * self.time_stamp_weight
-        }
-    }
-
-    /// offset into array for data common to tx and rx RP1210 formats
-    fn offset(&self) -> usize {
-        if self.tx {
-            0
-        } else {
-            5
-        }
-    }
-
-    pub fn echo(&self) -> bool {
-        self.tx || self.data[4] != 0
     }
 
     pub fn source(&self) -> u8 {
-        self.data[4 + self.offset()]
+        (self.id & 0xFF) as u8
     }
 
     pub fn pgn(&self) -> u32 {
-        let mut pgn = ((self.data[2 + self.offset()] as u32 & 0xFF) << 16)
-            | ((self.data[1 + self.offset()] as u32 & 0xFF) << 8)
-            | (self.data[self.offset()] as u32 & 0xFF);
+        let mut pgn = 0xFFFF & (self.id >> 8);
         if pgn < 0xF000 {
             pgn |= self.dest() as u32;
         }
@@ -188,38 +122,27 @@ impl J1939Packet {
     }
 
     pub fn dest(&self) -> u8 {
-        self.data[5 + self.offset()]
+        (0xFF & (self.id >> 8)) as u8
     }
 
     pub fn priority(&self) -> u8 {
-        self.data[3 + self.offset()] & 0x07
+        (self.id >> 27) as u8
     }
 
     pub fn header(&self) -> String {
-        format!(
-            "{:06X}{:02X}",
-            ((self.priority() as u32) << 18) | self.pgn(),
-            self.source()
-        )
+        format!("{:08X}", self.id)
     }
 
     pub fn id(&self) -> u32 {
-        let d = &self.data;
-        let o = self.offset();
-        let id = u32::from_le_bytes([d[o + 4], d[o], d[o + 1], d[o + 2]]);
-        if id > 0xF000 {
-            id | ((d[o + 4] as u32) << 8)
-        } else {
-            id
-        }
+        self.id
     }
 
-    pub fn data_str(&self) -> String {
+    fn data_str(&self) -> String {
         as_hex(&self.data())
     }
 
     pub fn data(&self) -> &[u8] {
-        &self.data[self.offset() + 6..]
+        &self.payload
     }
 
     pub fn channel(&self) -> u8 {

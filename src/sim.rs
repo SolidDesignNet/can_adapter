@@ -5,60 +5,43 @@ use std::thread::Builder;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::bus::{Bus, PushBus};
-use crate::connection::Connection;
+use crate::connection::{Connection, ConnectionFactory, DeviceDescriptor, ProtocolDescriptor};
 use crate::packet::*;
 
-pub struct Rp1210 {
+pub struct SimulatedConnection {
     bus: Box<PushBus<J1939Packet>>,
     running: Arc<AtomicBool>,
 }
-impl Rp1210 {
-    #[deprecated(note = "Must be built with Win32 target to use RP1210 adapters.")]
-    pub fn new(
-        _id: &str,
-        device: i16,
-        channel: Option<u8>,
-        _connection_string: &str,
-        _address: u8,
-        _app_packetized: bool,
-    ) -> Result<Rp1210> {
+impl SimulatedConnection {
+    pub fn new() -> Result<SimulatedConnection> {
         let bus = PushBus::new();
         let running = Arc::new(AtomicBool::new(false));
-        let dev = device as u8;
         {
             let running = running.clone();
             let bus = bus.clone();
             Builder::new()
                 .name("rp1210".into())
-                .spawn(move || run(channel, dev, running, bus))?;
+                .spawn(move || run(running, bus))?;
         }
-        Ok(Rp1210 {
+        Ok(SimulatedConnection {
             bus: Box::new(bus.clone()),
             running: running.clone(),
         })
     }
 }
 
-fn run(channel: Option<u8>, dev: u8, running: Arc<AtomicBool>, mut bus: PushBus<J1939Packet>) {
+fn run(running: Arc<AtomicBool>, mut bus: PushBus<J1939Packet>) {
     running.store(true, Ordering::Relaxed);
-    let mut seq: u64 = u64::from_be_bytes([dev, 0, 0, 0, 0, 0, 0, 0]);
+    let mut seq: u64 = u64::from_be_bytes([0, 0, 0, 0, 0, 0, 0, 0]);
     while running.load(Ordering::Relaxed) {
-        let packet = J1939Packet::new_packet(
-            Some(now()),
-            channel.unwrap_or(0),
-            6,
-            0xFEF1,
-            0,
-            0x0,
-            &seq.to_be_bytes(),
-        );
+        let packet = J1939Packet::new_packet(Some(now()), 0, 6, 0xFEF1, 0, 0x0, &seq.to_be_bytes());
         bus.push(Some(packet));
         std::thread::sleep(Duration::from_millis(100));
         seq = seq + 1;
     }
 }
 
-impl Connection for Rp1210 {
+impl Connection for SimulatedConnection {
     /// Send packet and return packet echoed back from adapter
     fn send(&mut self, packet: &J1939Packet) -> Result<J1939Packet> {
         let packet = J1939Packet::new_packet(
@@ -88,10 +71,33 @@ fn now() -> u32 {
     since_the_epoch as u32
 }
 
-impl Drop for Rp1210 {
+impl Drop for SimulatedConnection {
     fn drop(&mut self) {
         self.running.store(false, Ordering::Relaxed);
         self.bus.close();
         //let _ = self.thread.take().unwrap().join();
     }
+}
+struct SimulatedConnectionFactory {}
+impl ConnectionFactory for SimulatedConnectionFactory {
+    fn new(&self) -> Result<Box<dyn Connection>> {
+        Ok(Box::new(SimulatedConnection::new()?) as Box<dyn Connection>)
+    }
+
+    fn command_line(&self) -> String {
+        "sim".to_string()
+    }
+
+    fn name(&self) -> String {
+        "Simulated CAN stream".to_string()
+    }
+}
+pub fn factory() -> Result<ProtocolDescriptor, anyhow::Error> {
+    Ok(ProtocolDescriptor {
+        name: "Simulation".to_string(),
+        devices: vec![DeviceDescriptor {
+            name: "one".to_string(),
+            connections: vec![Box::new(SimulatedConnectionFactory {})],
+        }],
+    })
 }
