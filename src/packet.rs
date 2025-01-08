@@ -39,25 +39,7 @@ fn as_hex(data: &[u8]) -> String {
 }
 
 impl J1939Packet {
-    pub fn new_rp1210(tx: bool, channel: u8, data: &[u8], time_stamp_weight: f64) -> J1939Packet {
-        let (time, data) = if tx {
-            (u32::from_be_bytes(data[0..4].try_into().expect("")), &data[5..])
-        } else {
-            (0, &data[0..])
-        };
-        let payload: Vec<u8> = data[4..].into();
-        let priority = data[0] as u32;
-        let pgn = u32::from_be_bytes([0, data[1], data[2], data[3]]);
-        let sa = data[4] as u32;
-        J1939Packet {
-            id: (priority << 27) | (pgn << 8) | sa,
-            payload,
-            tx,
-            channel,
-            time_stamp_weight,
-            time,
-        }
-    }
+
 
     pub fn len(&self) -> usize {
         self.payload.len()
@@ -79,7 +61,7 @@ impl J1939Packet {
         Self::new(
             time,
             channel,
-            ((priority as u32) << 24)
+            ((priority as u32) << 26)
                 | (pgn << 8)
                 | if pgn >= 0xf000 { 0 } else { (da as u32) << 8 }
                 | (sa as u32),
@@ -126,7 +108,7 @@ impl J1939Packet {
     }
 
     pub fn priority(&self) -> u8 {
-        (self.id >> 27) as u8
+        (self.id >> 26) as u8
     }
 
     pub fn header(&self) -> String {

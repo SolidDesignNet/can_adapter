@@ -23,4 +23,7 @@ libloading = "0.8.6"
 rust-ini = "0.21.1"
 clap = { version = "4.5.23", features = ["derive"] }
 color-print = { version = "0.3.7" }
+dbg_hex={version="0.2.0"}
+
+[target.'cfg(linux)'.build-dependencies]
 socketcan = { version = "3.5.0", features = ["enumerate"] }

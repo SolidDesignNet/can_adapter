@@ -19,7 +19,7 @@
                     "kind": "bin"
                 }
             },
-            "args": ["--adapter","SIM", "--device", "1"],
+            "args": ["rp1210","PEAKRP32","1","-C","J1939:Baud=500"],
             "cwd": "${workspaceFolder}"
         }
     ]

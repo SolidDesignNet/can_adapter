@@ -4,7 +4,6 @@ use clap::{Parser, Subcommand};
 use connection::Connection;
 use packet::J1939Packet;
 use rp1210::Rp1210;
-use socketcanconnection::SocketCanConnection;
 
 pub mod bus;
 pub mod connection;
@@ -12,7 +11,11 @@ pub mod packet;
 pub mod rp1210;
 pub mod rp1210_parsing;
 pub mod sim;
+
+#[cfg(target_os = "linux")]
 pub mod socketcanconnection;
+#[cfg(target_os = "linux")]
+use socketcanconnection::SocketCanConnection;
 
 #[derive(Parser, Debug, Default, Clone)]
 pub struct Cli {
@@ -36,7 +39,8 @@ pub enum Descriptors {
     /// SAE J2534 - TODO
     J2534 {},
     /// Linux "socketcan" interface. Modules must already be loaded.
-    #[command(name="socketcan")]
+    #[command(name = "socketcan")]
+    #[cfg(target_os = "linux")]
     SocketCan {
         /// device: 'can0'
         //#[arg(long, short('d'))]
@@ -69,6 +73,7 @@ impl Cli {
             Descriptors::List => list_all(),
             Descriptors::Sim {} => todo!(),
             Descriptors::J2534 {} => todo!(),
+            #[cfg(target_os = "linux")]
             Descriptors::SocketCan { dev, speed } => {
                 Ok(Box::new(SocketCanConnection::new(&dev, *speed)?) as Box<dyn Connection>)
             }
@@ -110,7 +115,7 @@ pub fn main() -> Result<(), anyhow::Error> {
     // open the adapter
     let mut connection = Cli::parse().connect()?;
     {
-        // request VIN from ECM
+        eprintln!("request VIN from ECM");
         // start collecting packets
         let mut packets = connection.iter_for(Duration::from_secs(2));
         // send request for VIN
@@ -121,7 +126,7 @@ pub fn main() -> Result<(), anyhow::Error> {
             .find(|p| p.pgn() == 0xFEEC && p.source() == 0)
             // log the VIN
             .map(|p| {
-                print!(
+                println!(
                     "ECM {:02X} VIN: {}\n{}",
                     p.source(),
                     String::from_utf8(p.data().into()).unwrap(),
@@ -130,16 +135,21 @@ pub fn main() -> Result<(), anyhow::Error> {
             });
     }
     {
-        // request VIN from Broadcast
+        eprintln!("\nrequest VIN from Broadcast");
         // start collecting packets
-        let packets = connection.iter_for(Duration::from_secs(5));
+        let packets = connection.iter_for(Duration::from_secs(2));
 
         // send request for VIN
         connection.send(&J1939Packet::new(None, 1, 0x18EAFFF9, &[0xEC, 0xFE, 0x00]))?;
         // filter for all results
         packets
-            .filter(|p| p.pgn() == 0xFEEC)
+            .filter(|p| p.pgn() == 0xFEEC || p.pgn() == 0xEAFF || p.pgn() & 0xFF00 == 0xE800)
+            .map(|p| {
+                eprintln!("   {p}");
+                p
+            })
             // log the VINs
+            .filter(|p| p.pgn() == 0xFEEC)
             .for_each(|p| {
                 println!(
                     "SA: {:02X} VIN: {}",
@@ -148,7 +158,7 @@ pub fn main() -> Result<(), anyhow::Error> {
                 )
             });
     }
-    // log everything for the next 30 days
+    eprintln!("\n\nlog everything for the next 30 days");
     connection
         .iter_for(Duration::from_secs(60 * 60 * 24 * 30))
         .for_each(|p| println!("{}", p));

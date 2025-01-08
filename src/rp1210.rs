@@ -122,19 +122,20 @@ impl API {
         Ok(())
     }
     fn send(&self, packet: &J1939Packet) -> Result<i16> {
-        let pgn = packet.pgn().to_be_bytes();
-        let buf = [&[
-            pgn[0],
-            pgn[1],
-            pgn[2],
-            packet.priority(),
-            packet.source(),
-            if packet.pgn() < 0xF000 {
-                packet.pgn() as u8
-            } else {
-                0
-            },
-        ], packet.data()].concat();
+        let id = packet.pgn();
+        let pgn = id.to_le_bytes();
+        let buf = [
+            &[
+                pgn[0],
+                pgn[1],
+                pgn[2],
+                packet.priority(),
+                packet.source(),
+                if id < 0xF000 { packet.dest() } else { 0 },
+            ],
+            packet.data(),
+        ]
+        .concat();
         self.verify_return(unsafe { (self.send_fn)(self.id, buf.as_ptr(), buf.len() as i16, 0, 0) })
     }
 }
@@ -178,12 +179,28 @@ impl Rp1210 {
             while running.load(Relaxed) {
                 let size = unsafe { read(id, buf.as_mut_ptr(), PACKET_SIZE as i16, 0) };
                 if size > 0 {
-                    bus.push(Some(J1939Packet::new_rp1210(
-                        false,
+                    let data = &buf[0..size as usize];
+                    let time = u32::from_be_bytes(
+                        data[0..4].try_into().expect("unable to decode timestamp"),
+                    );
+                    let echoed = data[4];
+                    let payload = &data[11..(data.len())];
+                    let priority = data[8] & 0x07;
+                    let pgn = u32::from_be_bytes([0, data[7], data[6], data[5]]);
+                    let sa = data[9];
+                    let da = if pgn < 0xF000 { data[10] } else { 0 };
+                    let pgn = pgn | (da as u32);
+
+                    let p = J1939Packet::new_packet(
+                        Some(time),
                         channel,
-                        &buf[0..size as usize],
-                        time_stamp_weight,
-                    )));
+                        priority,
+                        pgn,
+                        da,
+                        sa,
+                        payload,
+                    );
+                    bus.push(Some(p));
                 } else {
                     if size < 0 {
                         // read error
@@ -207,7 +224,7 @@ impl Rp1210 {
 impl Connection for Rp1210 {
     /// Send packet and return packet echoed back from adapter
     fn send(&mut self, packet: &J1939Packet) -> Result<J1939Packet> {
-        let end = Instant::now() + Duration::from_secs(2);
+        let end = Instant::now() + Duration::from_millis(50);
         // FIXMEiter_unti
         let stream = self.bus.iter().take_while(|_| Instant::now() < end);
         let sent = self.api.send(packet);
@@ -215,8 +232,8 @@ impl Connection for Rp1210 {
         sent.map(|_| {
             stream
                 .flat_map(|o| o)
-                .find(move |p| p.data() == packet.data())
-                .unwrap()
+                .find(move |p| p.header() == packet.header() && p.data() == packet.data())
+                .expect("Echo failed.")
         })
     }
 

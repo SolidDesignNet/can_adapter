@@ -82,6 +82,7 @@ dependencies = [
  "anyhow",
  "clap",
  "color-print",
+ "dbg_hex",
  "libloading",
  "rust-ini",
  "socketcan",
@@ -191,6 +192,12 @@ name = "crunchy"
 version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7a81dae078cea95a014a339291cec439d2f232ebe854a9d672b796c6afafa9b7"
+
+[[package]]
+name = "dbg_hex"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "35df069ad4872b5d65ee7f5e37d12ab629834b1e162b3292a71f30ba7e8884ee"
 
 [[package]]
 name = "dlv-list"

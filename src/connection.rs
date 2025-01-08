@@ -2,7 +2,9 @@ use std::time::{Duration, Instant};
 
 use anyhow::Result;
 
-use crate::{packet::J1939Packet, rp1210_parsing, sim, socketcanconnection};
+#[cfg(target_os = "linux")]
+use crate::socketcanconnection;
+use crate::{packet::J1939Packet, rp1210_parsing, sim};
 
 /// Represents an adapter. This may be RP1210, SocketCAN, simulated or J2534 (eventually)
 ///
@@ -66,6 +68,7 @@ pub struct DeviceDescriptor {
 pub fn enumerate_connections() -> Result<Vec<ProtocolDescriptor>, anyhow::Error> {
     Ok([
         rp1210_parsing::list_all()?,
+        #[cfg(target_os = "linux")]
         socketcanconnection::list_all()?,
         sim::factory()?,
     ]
