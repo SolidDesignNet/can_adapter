@@ -3,12 +3,15 @@ use std::time::Duration;
 use clap::{Parser, Subcommand};
 use connection::Connection;
 use packet::J1939Packet;
+#[cfg(windows)]
 use rp1210::Rp1210;
 
 pub mod bus;
 pub mod connection;
 pub mod packet;
+#[cfg(windows)]
 pub mod rp1210;
+#[cfg(windows)]
 pub mod rp1210_parsing;
 pub mod sim;
 
@@ -51,6 +54,7 @@ pub enum Descriptors {
         speed: u64,
     },
     /// TMC RP1210 interface for Windows.
+    #[cfg(windows)]
     RP1210 {
         /// RP1210 Adapter Identifier
         id: String,
@@ -77,6 +81,7 @@ impl Cli {
             Descriptors::SocketCan { dev, speed } => {
                 Ok(Box::new(SocketCanConnection::new(&dev, *speed)?) as Box<dyn Connection>)
             }
+            #[cfg(windows)]
             Descriptors::RP1210 {
                 id,
                 device,
@@ -123,6 +128,11 @@ pub fn main() -> Result<(), anyhow::Error> {
 
         // filter for ECM result
         packets
+            .filter(|p| p.pgn() == 0xFEEC || p.pgn() == 0xEAFF || p.pgn() & 0xFF00 == 0xE800)
+            .map(|p| {
+                eprintln!("   {p}");
+                p
+            })
             .find(|p| p.pgn() == 0xFEEC && p.source() == 0)
             // log the VIN
             .map(|p| {

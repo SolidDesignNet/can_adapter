@@ -3,9 +3,7 @@ use crate::connection::Connection;
 use crate::packet::*;
 use crate::rp1210_parsing;
 use anyhow::*;
-#[cfg(not(windows))]
 use libloading::os::unix::Symbol as WinSymbol;
-#[cfg(windows)]
 use libloading::os::windows::Symbol as WinSymbol;
 use libloading::*;
 use std::ffi::CString;

@@ -25,5 +25,5 @@ clap = { version = "4.5.23", features = ["derive"] }
 color-print = { version = "0.3.7" }
 dbg_hex={version="0.2.0"}
 
-[target.'cfg(linux)'.build-dependencies]
+[target.'cfg(target_os = "linux")'.dependencies]
 socketcan = { version = "3.5.0", features = ["enumerate"] }

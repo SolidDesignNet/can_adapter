@@ -130,6 +130,10 @@ impl J1939Packet {
     pub fn channel(&self) -> u8 {
         self.channel
     }
+    
+    pub fn time_stamp_weight(&self) -> f64 {
+        self.time_stamp_weight
+    }
 }
 
 #[cfg(test)]

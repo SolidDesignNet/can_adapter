@@ -19,7 +19,7 @@
                     "kind": "bin"
                 }
             },
-            "args": ["rp1210","PEAKRP32","1","-C","J1939:Baud=500"],
+            "args": ["socketcan" ,"can0"],
             "cwd": "${workspaceFolder}"
         }
     ]
