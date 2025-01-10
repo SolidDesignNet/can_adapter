@@ -4,7 +4,7 @@ use crate::{packet::J1939Packet, sim};
 use anyhow::Result;
 
 #[cfg(windows)]
-use crate::rp1210_parsing;
+use crate::rp1210;
 #[cfg(target_os = "linux")]
 use crate::socketcanconnection;
 
@@ -70,7 +70,7 @@ pub struct DeviceDescriptor {
 pub fn enumerate_connections() -> Result<Vec<ProtocolDescriptor>, anyhow::Error> {
     Ok([
         #[cfg(target_os = "windows")]
-        rp1210_parsing::list_all()?,
+        rp1210::list_all()?,
         #[cfg(target_os = "linux")]
         socketcanconnection::list_all()?,
         sim::factory()?,

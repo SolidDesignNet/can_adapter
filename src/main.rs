@@ -9,11 +9,10 @@ use rp1210::Rp1210;
 pub mod bus;
 pub mod connection;
 pub mod packet;
+pub mod sim;
+
 #[cfg(windows)]
 pub mod rp1210;
-#[cfg(windows)]
-pub mod rp1210_parsing;
-pub mod sim;
 
 #[cfg(target_os = "linux")]
 pub mod socketcanconnection;
@@ -87,13 +86,17 @@ impl Cli {
                 device,
                 connection_string,
                 app_packetize,
-            } => Ok(Box::new(Rp1210::new(
+            } => {
+                // hold the locks for the whole scope
+                let mut cs = rp1210::CONNECTION_STRING.write().unwrap();
+                *cs= connection_string.to_string();
+                let mut ap = rp1210::APP_PACKETIZATION.write().unwrap();
+                *ap = *app_packetize;
+                Ok(Box::new(Rp1210::new(
                 id,
                 *device,
-                connection_string,
                 self.source_address,
-                *app_packetize,
-            )?) as Box<dyn Connection>),
+            )?) as Box<dyn Connection>)},
         }
     }
 }
@@ -122,7 +125,7 @@ pub fn main() -> Result<(), anyhow::Error> {
     {
         eprintln!("request VIN from ECM");
         // start collecting packets
-        let mut packets = connection.iter_for(Duration::from_secs(2));
+        let packets = connection.iter_for(Duration::from_secs(2));
         // send request for VIN
         connection.send(&J1939Packet::new(None, 1, 0x18EA00F9, &[0xEC, 0xFE, 0x00]))?;
 

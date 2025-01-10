@@ -1,15 +1,19 @@
-use crate::bus::*;
+use std::{
+    fmt::Display,
+    sync::{Arc, LazyLock, RwLock},
+};
+
 use crate::connection::Connection;
+use crate::connection::DeviceDescriptor;
+use crate::connection::ProtocolDescriptor;
 use crate::packet::*;
-use crate::rp1210_parsing;
+use crate::{bus::*, connection::ConnectionFactory};
 use anyhow::*;
-use libloading::os::unix::Symbol as WinSymbol;
 use libloading::os::windows::Symbol as WinSymbol;
 use libloading::*;
 use std::ffi::CString;
 use std::sync::atomic::Ordering::Relaxed;
 use std::sync::atomic::*;
-use std::sync::*;
 use std::time::Duration;
 use std::time::Instant;
 
@@ -86,13 +90,10 @@ impl API {
             Ok(v)
         }
     }
-    fn client_connect(
-        &mut self,
-        dev_id: i16,
-        connection_string: &str,
-        address: u8,
-        app_packetize: bool,
-    ) -> Result<()> {
+    fn client_connect(&mut self, dev_id: i16, address: u8) -> Result<()> {
+        let str = CONNECTION_STRING.read().unwrap().clone();
+        let connection_string: &str = &str;
+        let app_packetize: bool = *APP_PACKETIZATION.read().unwrap();
         let c_to_print = CString::new(connection_string).expect("CString::new failed");
         self.id = self.verify_return(unsafe {
             (self.client_connect_fn)(
@@ -147,19 +148,16 @@ impl Drop for Rp1210 {
 
 #[allow(dead_code)]
 impl Rp1210 {
-    pub fn new(
-        id: &str,
-        device: i16,
-        connection_string: &str,
-        address: u8,
-        app_packetize: bool,
-    ) -> Result<Rp1210> {
-        let time_stamp_weight = rp1210_parsing::time_stamp_weight(id)?;
+    pub fn new(id: &str, device: i16, address: u8) -> Result<Rp1210> {
+        let time_stamp_weight = time_stamp_weight(id)?;
 
         let mut api = API::new(id)?;
         let read = *api.read_fn;
         let get_error_fn = *api.get_error_fn;
-        api.client_connect(device, connection_string, address, app_packetize)?;
+        // there may be 
+let connection_string={        let connection_string = CONNECTION_STRING.read().unwrap();
+        api.client_connect(device, address)?;
+        connection_string.clone()};
         let id = api.id;
 
         let running = Arc::new(AtomicBool::new(true));
@@ -170,7 +168,6 @@ impl Rp1210 {
             running: running.clone(),
         };
 
-        let connection_string = connection_string.to_string();
         std::thread::spawn(move || {
             let mut buf: [u8; PACKET_SIZE] = [0; PACKET_SIZE];
             let channel = 0; // FIXME channel.unwrap_or(0);
@@ -238,4 +235,192 @@ impl Connection for Rp1210 {
     fn iter(&self) -> Box<dyn Iterator<Item = Option<J1939Packet>> + Send + Sync> {
         self.bus.iter()
     }
+}
+
+pub static CONNECTION_STRING: LazyLock<Arc<RwLock<String>>> =
+    LazyLock::new(|| Arc::new(RwLock::new("J1939".into())));
+pub static APP_PACKETIZATION: LazyLock<Arc<RwLock<bool>>> =
+    LazyLock::new(|| Arc::new(RwLock::new(false)));
+
+#[derive(Debug)]
+struct Rp1210Device {
+    pub id: i16,
+    pub name: String,
+    pub description: String,
+}
+#[derive(Debug)]
+struct Rp1210Product {
+    pub id: String,
+    pub description: String,
+    pub devices: Vec<Rp1210Device>,
+}
+
+struct Rp1210Factory {
+    id: String,
+    device: i16,
+    address: u8,
+    name: String,
+}
+impl Display for Rp1210Factory {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.name)
+    }
+}
+impl ConnectionFactory for Rp1210Factory {
+    // FIXME should be impl From<Rp1210Factory> for Rp1210
+    fn new(&self) -> Result<Box<dyn crate::connection::Connection>, anyhow::Error> {
+        Ok(Box::new(Rp1210::new(&self.id, self.device, self.address)?) as Box<dyn Connection>)
+    }
+
+    fn command_line(&self) -> String {
+        color_print::cformat!("rp1210 {} {}", self.id, self.device)
+    }
+
+    fn name(&self) -> String {
+        self.name.to_string()
+    }
+}
+
+impl Display for Rp1210Device {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{} {}:{}", self.id, self.name, self.description)
+    }
+}
+impl Display for Rp1210Product {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        writeln!(f, "{} {}", self.id, self.description)?;
+        for d in &self.devices {
+            writeln!(f, "{}", d)?;
+        }
+        std::fmt::Result::Ok(())
+    }
+}
+
+/// legacy.  Should be inlined into list_all
+fn list_all_products() -> Result<Vec<Rp1210Product>> {
+    let start = std::time::Instant::now();
+    let filename = "c:\\Windows\\RP121032.ini";
+    let load_from_file = ini::Ini::load_from_file(filename);
+    if load_from_file.is_err() {
+        eprintln!(
+            "Unable to process RP1210 file, {}.\n  {:?}",
+            filename,
+            load_from_file.err()
+        );
+        return Ok(vec![]);
+    }
+    let rtn = Ok(load_from_file?
+        .get_from(Some("RP1210Support"), "APIImplementations")
+        .unwrap_or("")
+        .split(',')
+        .map(|s| {
+            let (description, devices) = list_devices_for_prod(s).unwrap_or_default();
+            Rp1210Product {
+                id: s.to_string(),
+                description: description.to_string(),
+                devices,
+            }
+        })
+        .collect());
+    println!("RP1210 INI parsing in {} ms", start.elapsed().as_millis());
+    rtn
+}
+
+fn list_devices_for_prod(id: &str) -> Result<(String, Vec<Rp1210Device>)> {
+    let start = std::time::Instant::now();
+    let ini = ini::Ini::load_from_file(&format!("c:\\Windows\\{}.ini", id))?;
+
+    // find device IDs for J1939
+    let j1939_devices: Vec<&str> = ini
+        .iter()
+        // find J1939 protocol description
+        .filter(|(section, properties)| {
+            section.unwrap_or("").starts_with("ProtocolInformation")
+                && properties.get("ProtocolString") == Some("J1939")
+        })
+        // which device ids support J1939?
+        .flat_map(|(_, properties)| {
+            properties
+                .get("Devices")
+                .map_or(vec![], |s| s.split(',').collect())
+        })
+        .collect();
+
+    // find the specified devices
+    let rtn = ini
+        .iter()
+        .filter(|(section, properties)| {
+            section
+                .map(|n| n.starts_with("DeviceInformation"))
+                .unwrap_or(false)
+                && properties
+                    .get("DeviceID")
+                    .map(|id| j1939_devices.contains(&id))
+                    .unwrap_or(false)
+        })
+        .map(|(_, properties)| Rp1210Device {
+            id: properties
+                .get("DeviceID")
+                .unwrap_or("0")
+                .parse()
+                .unwrap_or(-1),
+            name: properties
+                .get("DeviceName")
+                .unwrap_or("Unknown")
+                .to_string(),
+            description: properties
+                .get("DeviceDescription")
+                .unwrap_or("Unknown")
+                .to_string(),
+        })
+        .collect();
+    println!("  {}.ini parsing in {} ms", id, start.elapsed().as_millis());
+    let description = ini
+        .section(Some("VendorInformation"))
+        .and_then(|s| s.get("Name"))
+        .unwrap_or_default()
+        .to_string();
+    Ok((description, rtn))
+}
+
+pub fn time_stamp_weight(id: &str) -> Result<f64> {
+    let ini = ini::Ini::load_from_file(&format!("c:\\Windows\\{}.ini", id))?;
+    Ok(ini
+        .get_from_or::<&str>(Some("VendorInformation"), "TimeStampWeight", "1")
+        .parse()?)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn simple() -> Result<(), Error> {
+        list_all_products()?;
+        Ok(())
+    }
+}
+
+pub fn list_all() -> Result<ProtocolDescriptor, anyhow::Error> {
+    Ok(ProtocolDescriptor {
+        name: "RP1210".into(),
+        devices: list_all_products()?
+            .iter()
+            .map(|p| DeviceDescriptor {
+                name: p.description.clone(),
+                connections: p
+                    .devices
+                    .iter()
+                    .map(|d| {
+                        Box::new(Rp1210Factory {
+                            id: p.id.clone(),
+                            device: d.id,
+                            address: 0xF9,
+                            name: d.description.clone(),
+                        }) as Box<dyn ConnectionFactory>
+                    })
+                    .collect(),
+            })
+            .collect(),
+    })
 }
