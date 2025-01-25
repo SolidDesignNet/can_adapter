@@ -27,3 +27,6 @@ dbg_hex={version="0.2.0"}
 
 [target.'cfg(target_os = "linux")'.dependencies]
 socketcan = { version = "3.5.0", features = ["enumerate"] }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+serialport="4.7.0"

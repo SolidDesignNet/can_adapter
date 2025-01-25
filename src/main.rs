@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::{ops::Deref, time::Duration};
 
 use clap::{Parser, Subcommand};
 use connection::Connection;
@@ -14,10 +14,32 @@ pub mod sim;
 #[cfg(windows)]
 pub mod rp1210;
 
+#[cfg(windows)]
+pub mod slcan;
+
 #[cfg(target_os = "linux")]
 pub mod socketcanconnection;
+use slcan::Slcan;
 #[cfg(target_os = "linux")]
 use socketcanconnection::SocketCanConnection;
+
+#[derive(Parser, Debug, Default, Clone)]
+pub struct ThisCli {
+    #[command(flatten)]
+    args: Cli,
+
+    /// before logging demonstrate reading VIN
+    #[arg(long)]
+    vin: bool,
+}
+
+impl Deref for ThisCli {
+    type Target = Cli;
+
+    fn deref(&self) -> &Self::Target {
+        &self.args
+    }
+}
 
 #[derive(Parser, Debug, Default, Clone)]
 pub struct Cli {
@@ -52,6 +74,15 @@ pub enum Descriptors {
         #[arg(long, short('s'), default_value = "500000")]
         speed: u64,
     },
+    /// SLCAN interface for Windows.
+    #[cfg(windows)]
+    SLCAN {
+        /// COM port
+        port: String,
+
+        // CAN bus speed expressed in kbaud - 10, 20, 50, 100, 125, 250, 500, 800, 1000
+        speed: u32,
+    },
     /// TMC RP1210 interface for Windows.
     #[cfg(windows)]
     RP1210 {
@@ -72,6 +103,7 @@ pub enum Descriptors {
 
 impl Cli {
     fn connect(&self) -> Result<Box<dyn Connection>, anyhow::Error> {
+        eprintln!("connecting {:?}", self.connection);
         match &self.connection {
             Descriptors::List => list_all(),
             Descriptors::Sim {} => todo!(),
@@ -81,22 +113,22 @@ impl Cli {
                 Ok(Box::new(SocketCanConnection::new(&dev, *speed)?) as Box<dyn Connection>)
             }
             #[cfg(windows)]
+            Descriptors::SLCAN { port, speed } => Ok(Box::new(Slcan::new(port, *speed)?)),
+            #[cfg(windows)]
             Descriptors::RP1210 {
                 id,
                 device,
                 connection_string,
                 app_packetize,
             } => {
-                // hold the locks for the whole scope
-                let mut cs = rp1210::CONNECTION_STRING.write().unwrap();
-                *cs= connection_string.to_string();
-                let mut ap = rp1210::APP_PACKETIZATION.write().unwrap();
-                *ap = *app_packetize;
-                Ok(Box::new(Rp1210::new(
-                id,
-                *device,
-                self.source_address,
-            )?) as Box<dyn Connection>)},
+                {
+                    let mut cs = rp1210::CONNECTION_STRING.write().unwrap();
+                    *cs = connection_string.to_string();
+                    let mut ap = rp1210::APP_PACKETIZATION.write().unwrap();
+                    *ap = *app_packetize;
+                }
+                Ok(Box::new(Rp1210::new(id, *device, self.source_address)?) as Box<dyn Connection>)
+            }
         }
     }
 }
@@ -121,59 +153,64 @@ fn hex8(str: &str) -> Result<u8, std::num::ParseIntError> {
 
 pub fn main() -> Result<(), anyhow::Error> {
     // open the adapter
-    let mut connection = Cli::parse().connect()?;
-    {
-        eprintln!("request VIN from ECM");
-        // start collecting packets
-        let packets = connection.iter_for(Duration::from_secs(2));
-        // send request for VIN
-        connection.send(&J1939Packet::new(None, 1, 0x18EA00F9, &[0xEC, 0xFE, 0x00]))?;
+    let args = ThisCli::parse();
+    let mut connection = args.connect()?;
+    if args.vin {
+        {
+            eprintln!("request VIN from ECM");
+            // start collecting packets
+            let packets = connection.iter_for(Duration::from_secs(2));
+            // send request for VIN
+            connection.send(&J1939Packet::new(None, 1, 0x18EA00F9, &[0xEC, 0xFE, 0x00]))?;
 
-        // filter for ECM result
-        packets
-            .filter(|p| p.pgn() == 0xFEEC || p.pgn() == 0xEAFF || p.pgn() & 0xFF00 == 0xE800)
-            .map(|p| {
-                eprintln!("   {p}");
-                p
-            })
-            .find(|p| p.pgn() == 0xFEEC && p.source() == 0)
-            // log the VIN
-            .map(|p| {
-                println!(
-                    "ECM {:02X} VIN: {}\n{}",
-                    p.source(),
-                    String::from_utf8(p.data().into()).unwrap(),
+            // filter for ECM result
+            packets
+                .filter(|p| p.pgn() == 0xFEEC || p.pgn() == 0xEAFF || p.pgn() & 0xFF00 == 0xE800)
+                .map(|p| {
+                    eprintln!("   {p}");
                     p
-                )
-            });
-    }
-    {
-        eprintln!("\nrequest VIN from Broadcast");
-        // start collecting packets
-        let packets = connection.iter_for(Duration::from_secs(2));
+                })
+                .find(|p| p.pgn() == 0xFEEC && p.source() == 0)
+                // log the VIN
+                .map(|p| {
+                    println!(
+                        "ECM {:02X} VIN: {}\n{}",
+                        p.source(),
+                        String::from_utf8(p.data().into()).unwrap(),
+                        p
+                    )
+                });
+        }
+        {
+            eprintln!("\nrequest VIN from Broadcast");
+            // start collecting packets
+            let packets = connection.iter_for(Duration::from_secs(2));
 
-        // send request for VIN
-        connection.send(&J1939Packet::new(None, 1, 0x18EAFFF9, &[0xEC, 0xFE, 0x00]))?;
-        // filter for all results
-        packets
-            .filter(|p| p.pgn() == 0xFEEC || p.pgn() == 0xEAFF || p.pgn() & 0xFF00 == 0xE800)
-            .map(|p| {
-                eprintln!("   {p}");
-                p
-            })
-            // log the VINs
-            .filter(|p| p.pgn() == 0xFEEC)
-            .for_each(|p| {
-                println!(
-                    "SA: {:02X} VIN: {}",
-                    p.source(),
-                    String::from_utf8(p.data().into()).unwrap()
-                )
-            });
+            // send request for VIN
+            connection.send(&J1939Packet::new(None, 1, 0x18EAFFF9, &[0xEC, 0xFE, 0x00]))?;
+            // filter for all results
+            packets
+                .filter(|p| p.pgn() == 0xFEEC || p.pgn() == 0xEAFF || p.pgn() & 0xFF00 == 0xE800)
+                .map(|p| {
+                    eprintln!("   {p}");
+                    p
+                })
+                // log the VINs
+                .filter(|p| p.pgn() == 0xFEEC)
+                .for_each(|p| {
+                    println!(
+                        "SA: {:02X} VIN: {}",
+                        p.source(),
+                        String::from_utf8(p.data().into()).unwrap()
+                    )
+                });
+        }
     }
+
     eprintln!("\n\nlog everything for the next 30 days");
     connection
-        .iter_for(Duration::from_secs(60 * 60 * 24 * 30))
-        .for_each(|p| println!("{}", p));
+        .iter()
+        .filter_map(|p|p) //_for(Duration::from_secs(60 * 60 * 24 * 30))
+        .for_each(|p| println!("{p}"));
     Ok(())
 }
