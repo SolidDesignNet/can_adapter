@@ -95,6 +95,7 @@ impl ConnectionFactory for SimulatedConnectionFactory {
 pub fn factory() -> Result<ProtocolDescriptor, anyhow::Error> {
     Ok(ProtocolDescriptor {
         name: "Simulation".to_string(),
+        instructions_url:"https://github.com/SolidDesignNet/j1939logger/blob/main/README.md".to_string(),
         devices: vec![DeviceDescriptor {
             name: "one".to_string(),
             connections: vec![Box::new(SimulatedConnectionFactory {})],

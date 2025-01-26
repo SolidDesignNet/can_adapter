@@ -62,7 +62,7 @@ impl SocketCanConnection {
             let p = if read_raw_frame.is_ok() {
                 let frame = read_raw_frame.unwrap();
                 let len = frame.can_dlc as usize;
-                if (0xFFFF & (frame.can_id >> 8) == 0xFEEC) {
+                if 0xFFFF & (frame.can_id >> 8) == 0xFEEC {
                     eprintln!("{:X} {:X?}", frame.can_id, frame.data)
                 }
                 Some(J1939Packet::new_socketcan(
@@ -137,6 +137,8 @@ impl ConnectionFactory for SocketCanConnectionFactory {
 pub(crate) fn list_all() -> Result<ProtocolDescriptor, anyhow::Error> {
     Ok(ProtocolDescriptor {
         name: "socketcan".into(),
+        instructions_url: "https://github.com/SolidDesignNet/j1939logger/blob/main/README.md"
+            .to_string(),
         devices: enumerate::available_interfaces()?
             .iter()
             .map(|v| DeviceDescriptor {

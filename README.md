@@ -58,3 +58,19 @@ Example:
 
 # Applications
 When combined with DBC or J1939DA parsing, this becomes a light weight CAN logger.  See https://github.com/SolidDesignNet/j1939logger.
+
+# Note for Linux setup:
+slcan setup:
+```
+slcand /dev/ttyACM0
+ip link set can0 name slcan
+ip link set slcan type can bitrate 500000
+ip link set slcan up
+```
+
+PEAK
+```
+ip link set can0 name peak
+ip link set peak type can bitrate 500000
+ip link set peak up
+```

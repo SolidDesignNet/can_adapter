@@ -60,6 +60,7 @@ pub trait ConnectionFactory {
 
 pub struct ProtocolDescriptor {
     pub name: String,
+    pub instructions_url: String,
     pub devices: Vec<DeviceDescriptor>,
 }
 pub struct DeviceDescriptor {
