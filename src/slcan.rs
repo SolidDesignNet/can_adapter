@@ -1,5 +1,6 @@
 use std::{
     collections::VecDeque,
+    io::{BufRead, BufReader},
     sync::{atomic::AtomicBool, Arc, Mutex},
     thread,
     time::{Duration, SystemTime},
@@ -88,14 +89,26 @@ impl Slcan {
     }
 
     fn from_can(&mut self, mut port: Box<dyn SerialPort>) {
+        // gross
+        // copy from port to buf
+        // copy from buf vecdeque
+        // copy line from vecdeque to vec
+        // parse string into byte[]
+
         let mut buf = [0; 64];
+        let mut q = VecDeque::new();
+
         while self.running.load(std::sync::atomic::Ordering::Relaxed) {
-            match port.read(&mut buf) {
-                Ok(len) => {
-                    let str = String::from_utf8_lossy(&buf[..len]);
-                    self.bus.push(parse_result(self.now(), &str).ok());
-                }
-                Err(len) => eprintln!("err {len:?}"),
+            let len = port.read(&mut buf).expect("Unable to read serial port");
+            q.extend(buf[..len].iter().cloned());
+
+            let index = q.iter().take_while(|u| **u != b'\r').count();
+            if index == 0 {
+                q.pop_front();
+            } else if index < q.len() {
+                let vec = q.drain(..index).collect();
+                let line: String = String::from_utf8(vec).expect("Invalid UTF8");
+                self.bus.push(parse_result(self.now(), &line).ok());
             }
         }
     }
@@ -119,11 +132,13 @@ const SIZE: usize = 8;
 // 0CF00A00 8 FF FF 00 FE FF FF 00 00
 fn parse_result(now: u32, buf: &str) -> Result<J1939Packet> {
     let buf = buf.trim();
+    // skip "T"
+    let buf=&buf[1..];
 
     let len = buf.len();
     if len < SIZE || len % 2 != 1 {
         let message = format!("Invalid buf {buf} len:{len} {}", len % 2);
-     eprintln!("{}",message);
+        eprintln!("{}", message);
         return Err(Error::msg(message));
     }
     let id = u32::from_str_radix(&buf[0..SIZE], 16)?;

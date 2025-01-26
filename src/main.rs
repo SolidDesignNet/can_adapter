@@ -163,7 +163,7 @@ pub fn main() -> Result<(), anyhow::Error> {
 
             // filter for ECM result
             packets
-                .filter(|p| p.pgn() == 0xFEEC || p.pgn() == 0xEAFF || p.pgn() & 0xFF00 == 0xE800)
+                .filter(|p| p.pgn() == 0xFEEC  || [0xEA00,0xEB00,0xEC00,0xE800].contains(&(p.pgn() & 0xFF00)))
                 .map(|p| {
                     eprintln!("   {p}");
                     p
