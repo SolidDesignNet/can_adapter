@@ -71,7 +71,6 @@ pub fn enumerate_connections() -> Result<Vec<ProtocolDescriptor>, anyhow::Error>
     Ok([
         #[cfg(target_os = "windows")]
         rp1210::list_all()?,
-        #[cfg(target_os = "windows")]
         slcan::list_all()?,
         #[cfg(target_os = "linux")]
         socketcanconnection::list_all()?,

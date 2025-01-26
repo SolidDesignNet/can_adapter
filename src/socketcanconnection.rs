@@ -95,7 +95,6 @@ impl Connection for SocketCanConnection {
         let frame = CanFrame::from_raw_id(packet.id(), packet.data()).expect("Invalid data packet");
         self.socket.lock().unwrap().write_frame(&frame)?;
 
-        // return echo - FIXME not working
         let p = J1939Packet::new_socketcan(self.now(), true, packet.id(), packet.data());
         self.bus.push(Some(p));
 
