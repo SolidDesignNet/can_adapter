@@ -120,6 +120,7 @@ impl API {
         self.send_command(/*CMD_SET_ALL_FILTERS_STATES_TO_PASS*/ 3, vec![])?;
         Ok(())
     }
+
     fn send(&self, packet: &J1939Packet) -> Result<i16> {
         let id = packet.pgn();
         let pgn = id.to_le_bytes();
@@ -149,16 +150,21 @@ impl Drop for Rp1210 {
 #[allow(dead_code)]
 impl Rp1210 {
     pub fn new(id: &str, device: i16, address: u8) -> Result<Rp1210> {
+        eprintln!("new rp1210 {id} {device}");
         let time_stamp_weight = time_stamp_weight(id)?;
 
+        eprintln!("new rp1210 api");
         let mut api = API::new(id)?;
         let read = *api.read_fn;
         let get_error_fn = *api.get_error_fn;
-        // there may be 
-let connection_string={        let connection_string = CONNECTION_STRING.read().unwrap();
+
+        // there may be
+        eprintln!("new rp1210 connect ");
         api.client_connect(device, address)?;
-        connection_string.clone()};
+
         let id = api.id;
+
+        eprintln!("new rp1210 alloc");
 
         let running = Arc::new(AtomicBool::new(true));
         let mut bus = PushBus::new();
@@ -168,11 +174,15 @@ let connection_string={        let connection_string = CONNECTION_STRING.read().
             running: running.clone(),
         };
 
+        eprintln!("new rp1210 spawn");
         std::thread::spawn(move || {
+            eprintln!("new rp1210 run");
             let mut buf: [u8; PACKET_SIZE] = [0; PACKET_SIZE];
             let channel = 0; // FIXME channel.unwrap_or(0);
             while running.load(Relaxed) {
+                eprintln!("new rp1210 loop");
                 let size = unsafe { read(id, buf.as_mut_ptr(), PACKET_SIZE as i16, 0) };
+                eprintln!("size: {size}");
                 if size > 0 {
                     let data = &buf[0..size as usize];
                     let time = u32::from_be_bytes(
@@ -195,6 +205,7 @@ let connection_string={        let connection_string = CONNECTION_STRING.read().
                         sa,
                         payload,
                     );
+                    eprintln!("  packet: {p}");
                     bus.push(Some(p));
                 } else {
                     if size < 0 {
@@ -202,7 +213,7 @@ let connection_string={        let connection_string = CONNECTION_STRING.read().
                         let code = -size;
                         let size = unsafe { (get_error_fn)(code, buf.as_mut_ptr()) } as usize;
                         let msg = String::from_utf8_lossy(&buf[0..size]).to_string();
-                        let driver = format!("{} {} {}", id, device, connection_string);
+                        let driver = format!("{} {} {}", id, device, CONNECTION_STRING.read().unwrap());
                         eprintln!("ERROR: {}: {}: {}", driver, code, msg,);
                         std::thread::sleep(Duration::from_millis(250));
                     } else {
@@ -220,7 +231,7 @@ impl Connection for Rp1210 {
     /// Send packet and return packet echoed back from adapter
     fn send(&mut self, packet: &J1939Packet) -> Result<J1939Packet> {
         let end = Instant::now() + Duration::from_millis(50);
-        // FIXMEiter_unti
+        // FIXME iter_unti
         let stream = self.bus.iter().take_while(|_| Instant::now() < end);
         let sent = self.api.send(packet);
         // FIXME needs better error handling
@@ -395,7 +406,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn simple() -> Result<(), Error> {
+    fn simple() -> Result<()> {
         list_all_products()?;
         Ok(())
     }
