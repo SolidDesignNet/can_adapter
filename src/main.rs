@@ -1,25 +1,23 @@
-use std::{ops::Deref, time::Duration};
+use std::{ops::Deref, thread, time::Duration};
 
 use clap::{Parser, Subcommand};
 use connection::Connection;
 use packet::J1939Packet;
-#[cfg(windows)]
-use rp1210::Rp1210;
+use slcan::Slcan;
 
 pub mod bus;
 pub mod connection;
 pub mod packet;
 pub mod sim;
+pub mod slcan;
 
 #[cfg(windows)]
 pub mod rp1210;
-
 #[cfg(windows)]
-pub mod slcan;
+use rp1210::Rp1210;
 
 #[cfg(target_os = "linux")]
 pub mod socketcanconnection;
-use slcan::Slcan;
 #[cfg(target_os = "linux")]
 use socketcanconnection::SocketCanConnection;
 
