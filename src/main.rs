@@ -1,4 +1,4 @@
-use std::{ops::Deref, thread, time::Duration};
+use std::{ops::Deref, time::Duration};
 
 use clap::{Parser, Subcommand};
 use connection::Connection;
