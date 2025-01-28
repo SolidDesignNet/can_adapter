@@ -28,6 +28,11 @@ use crate::packet::J1939Packet;
 ///   ip link set can0 up
 ///   ip link set can0 type can bitrate 500000
 /// ```
+/// 
+/// PEAK:
+/// ```
+/// sudo bash -xc 'rmmod peak_usb && modprobe peak_usb && ipslink set can0 name peak && ip link set peak type can bitrate 500000 && ip link set peak up'
+/// ```
 #[derive(Clone)]
 pub struct SocketCanConnection {
     socket: Arc<Mutex<CanSocket>>,

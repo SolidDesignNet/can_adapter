@@ -157,7 +157,7 @@ pub fn main() -> Result<(), anyhow::Error> {
         {
             eprintln!("request VIN from ECM");
             // start collecting packets
-            let packets = connection.iter_for(Duration::from_secs(2));
+            let packets = connection.iter_for(Duration::from_secs(5));
             // send request for VIN
             connection.send(&J1939Packet::new(None, 1, 0x18EA00F9, &[0xEC, 0xFE, 0x00]))?;
 
@@ -182,7 +182,7 @@ pub fn main() -> Result<(), anyhow::Error> {
         {
             eprintln!("\nrequest VIN from Broadcast");
             // start collecting packets
-            let packets = connection.iter_for(Duration::from_secs(2));
+            let packets = connection.iter_for(Duration::from_secs(5));
 
             // send request for VIN
             connection.send(&J1939Packet::new(None, 1, 0x18EAFFF9, &[0xEC, 0xFE, 0x00]))?;

@@ -223,5 +223,6 @@ pub fn list_all() -> Result<ProtocolDescriptor> {
                 }
             })
             .collect(),
+        instructions_url: "http://fixme".to_string(),
     })
 }
