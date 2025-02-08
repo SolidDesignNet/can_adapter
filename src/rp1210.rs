@@ -415,6 +415,7 @@ mod tests {
 pub fn list_all() -> Result<ProtocolDescriptor, anyhow::Error> {
     Ok(ProtocolDescriptor {
         name: "RP1210".into(),
+        instructions_url: "http://fixme".to_string(),
         devices: list_all_products()?
             .iter()
             .map(|p| DeviceDescriptor {
