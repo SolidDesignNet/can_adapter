@@ -38,8 +38,6 @@ impl Slcan {
 
         port.clear(serialport::ClearBuffer::All)?;
 
-        eprintln!(" opened {port_name}");
-
         let slcan = Slcan {
             bus: Box::new(PushBus::new()),
             outbound: Arc::new(Mutex::new(VecDeque::new())),
@@ -67,6 +65,7 @@ impl Slcan {
             thread::spawn(move || slcan.to_can(port));
         }
 
+        eprintln!(" opened {port_name}");
         Ok(slcan)
     }
     pub fn now(&self) -> u32 {
@@ -97,8 +96,6 @@ impl Slcan {
         port.write_all(b"C\r")
             .expect("Unable to write C to serialport.");
         port.flush().expect("Unable to flush serialport.");
-        port.clear(serialport::ClearBuffer::All)
-            .expect("Unable to clear buffers");
 
         eprintln!("to_can: closed");
     }
@@ -117,15 +114,15 @@ impl Slcan {
             let len = port.read(&mut buf);
             match len {
                 Ok(len) => {
-                    q.extend(buf[..len].iter().cloned());
+                    q.extend(buf[..len].into_iter());
 
                     let index = q.iter().take_while(|u| **u != b'\r').count();
                     if index == 0 {
                         q.pop_front();
                     } else if index < q.len() {
-                        let vec = q.drain(..index).collect();
+                        let vec: Vec<u8> = q.drain(..index).collect();
                         let line: String = String::from_utf8(vec).expect("Invalid UTF8");
-                        self.bus.push(parse_result(self.now(), &line).ok());
+                        self.bus.push(parse_result(self.now(), line).ok());
                     }
                 }
                 Err(e) => {
@@ -153,6 +150,7 @@ impl Drop for Slcan {
         if self.running.load(std::sync::atomic::Ordering::Relaxed) {
             self.running
                 .store(false, std::sync::atomic::Ordering::Relaxed);
+            self.bus.close();
             // give Windows time to clean up device
             thread::sleep(TIMEOUT * 2);
             eprintln!("dropped slcan");
@@ -160,20 +158,17 @@ impl Drop for Slcan {
     }
 }
 
-const SIZE: usize = 8;
+const SIZE: usize = 9;
 // 0CF00A00 8 FF FF 00 FE FF FF 00 00
-fn parse_result(now: u32, buf: &str) -> Result<J1939Packet> {
-    let buf = buf.trim();
-    // skip "T"
-    let buf = &buf[1..];
-
+fn parse_result(now: u32, buf: String) -> Result<J1939Packet> {
     let len = buf.len();
-    if len < SIZE || len % 2 != 1 {
+    // {T}{4 * 2 digit hex bytes}{1 digit length}{2 digit hex payload}
+    if len < SIZE || len % 2 != 0 {
         let message = format!("Invalid buf {buf} len:{len} {}", len % 2);
         eprintln!("{}", message);
         return Err(Error::msg(message));
     }
-    let id = u32::from_str_radix(&buf[0..SIZE], 16)?;
+    let id = u32::from_str_radix(&buf[1..SIZE], 16)?;
     let payload: Result<Vec<u8>, _> = ((1 + SIZE)..len)
         .step_by(2)
         .map(|i| u8::from_str_radix(&buf[i..i + 2], 16))
@@ -215,18 +210,18 @@ impl Connection for Slcan {
     }
 }
 struct SclanFactory {
-    port: SerialPortInfo,
+    port_info: SerialPortInfo,
     speed: u32,
 }
 
 impl ConnectionFactory for SclanFactory {
     fn new(&self) -> Result<Box<dyn Connection>> {
-        Slcan::new(self.port.port_name.as_str(), self.speed)
+        Slcan::new(self.port_info.port_name.as_str(), self.speed)
             .map(|c| Box::new(c) as Box<dyn Connection>)
     }
 
     fn command_line(&self) -> String {
-        color_print::cformat!("slcan {} {}", self.port.port_name, self.speed)
+        color_print::cformat!("slcan {} {}", self.port_info.port_name, self.speed)
     }
 
     fn name(&self) -> String {
@@ -235,26 +230,27 @@ impl ConnectionFactory for SclanFactory {
 }
 
 pub fn list_all() -> Result<ProtocolDescriptor> {
+    let devices = serialport::available_ports()?
+        .into_iter()
+        .map(|port_info| {
+            let connections = CAN_SPEEDS
+                .into_iter()
+                .map(|speed| {
+                    Box::new(SclanFactory {
+                        port_info: port_info.clone(),
+                        speed,
+                    }) as Box<dyn ConnectionFactory>
+                })
+                .collect();
+            DeviceDescriptor {
+                name: port_info.port_name.clone(),
+                connections,
+            }
+        })
+        .collect();
     Ok(ProtocolDescriptor {
         name: "SLCAN".to_string(),
-        devices: serialport::available_ports()?
-            .into_iter()
-            .map(|port| {
-                let c = CAN_SPEEDS
-                    .into_iter()
-                    .map(|speed| {
-                        Box::new(SclanFactory {
-                            port: port.clone(),
-                            speed,
-                        }) as Box<dyn ConnectionFactory>
-                    })
-                    .collect();
-                DeviceDescriptor {
-                    name: port.port_name.clone(),
-                    connections: c,
-                }
-            })
-            .collect(),
+        devices,
         instructions_url: "http://fixme".to_string(),
     })
 }

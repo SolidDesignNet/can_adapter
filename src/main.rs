@@ -1,4 +1,4 @@
-use std::{ops::Deref, time::Duration};
+use std::{ops::Deref, thread, time::Duration};
 
 use clap::{Parser, Subcommand};
 use connection::Connection;
@@ -72,8 +72,7 @@ pub enum Descriptors {
         #[arg(long, short('s'), default_value = "500000")]
         speed: u64,
     },
-    /// SLCAN interface for Windows.
-    #[cfg(windows)]
+    /// SLCAN interface
     SLCAN {
         /// COM port
         port: String,
@@ -110,7 +109,6 @@ impl Cli {
             Descriptors::SocketCan { dev, speed } => {
                 Ok(Box::new(SocketCanConnection::new(&dev, *speed)?) as Box<dyn Connection>)
             }
-            #[cfg(windows)]
             Descriptors::SLCAN { port, speed } => Ok(Box::new(Slcan::new(port, *speed)?)),
             #[cfg(windows)]
             Descriptors::RP1210 {
@@ -163,7 +161,10 @@ pub fn main() -> Result<(), anyhow::Error> {
 
             // filter for ECM result
             packets
-                .filter(|p| p.pgn() == 0xFEEC  || [0xEA00,0xEB00,0xEC00,0xE800].contains(&(p.pgn() & 0xFF00)))
+                .filter(|p| {
+                    p.pgn() == 0xFEEC
+                        || [0xEA00, 0xEB00, 0xEC00, 0xE800].contains(&(p.pgn() & 0xFF00))
+                })
                 .map(|p| {
                     eprintln!("   {p}");
                     p
