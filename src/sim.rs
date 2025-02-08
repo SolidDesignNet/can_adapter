@@ -4,7 +4,7 @@ use std::sync::*;
 use std::thread::Builder;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use crate::bus::{Bus, PushBus};
+use crate::pushbus::PushBus;
 use crate::connection::{Connection, ConnectionFactory, DeviceDescriptor, ProtocolDescriptor};
 use crate::packet::*;
 

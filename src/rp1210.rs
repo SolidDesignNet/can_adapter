@@ -29,7 +29,7 @@ type ClientDisconnectType = unsafe extern "stdcall" fn(i16) -> i16;
 
 pub struct Rp1210 {
     api: API,
-    bus: Box<PushBus<J1939Packet>>,
+    bus: PushBus<J1939Packet>,
     running: Arc<AtomicBool>,
 }
 #[derive(Debug)]
@@ -143,7 +143,6 @@ impl API {
 impl Drop for Rp1210 {
     fn drop(&mut self) {
         self.running.store(false, Relaxed);
-        self.bus.close();
     }
 }
 
@@ -170,7 +169,7 @@ impl Rp1210 {
         let mut bus = PushBus::new();
         let rp1210 = Rp1210 {
             api,
-            bus: Box::new(bus.clone()),
+            bus: bus.clone(),
             running: running.clone(),
         };
 

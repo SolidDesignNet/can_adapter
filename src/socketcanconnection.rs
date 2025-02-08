@@ -16,8 +16,7 @@ use std::thread;
 use std::time::Duration;
 use std::time::SystemTime;
 
-use crate::bus::Bus;
-use crate::bus::PushBus;
+use crate::pushbus::PushBus;
 use crate::connection::Connection;
 use crate::connection::ConnectionFactory;
 use crate::connection::DeviceDescriptor;
@@ -36,7 +35,7 @@ use crate::packet::J1939Packet;
 #[derive(Clone)]
 pub struct SocketCanConnection {
     socket: Arc<Mutex<CanSocket>>,
-    bus: Box<PushBus<J1939Packet>>,
+    bus: PushBus<J1939Packet>,
     running: Arc<AtomicBool>,
     start: SystemTime,
 }
@@ -46,7 +45,7 @@ impl SocketCanConnection {
     pub fn new(str: &str, speed: u64) -> Result<SocketCanConnection, anyhow::Error> {
         let socket_can_connection = SocketCanConnection {
             socket: Arc::new(Mutex::new(CanSocket::open(str)?)),
-            bus: Box::new(PushBus::new()),
+            bus: PushBus::new(),
             running: Arc::new(AtomicBool::new(false)),
             start: SystemTime::now(),
         };

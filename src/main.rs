@@ -5,7 +5,7 @@ use connection::Connection;
 use packet::J1939Packet;
 use slcan::Slcan;
 
-pub mod bus;
+pub mod pushbus;
 pub mod connection;
 pub mod packet;
 pub mod sim;

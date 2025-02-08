@@ -9,7 +9,7 @@ use anyhow::{Error, Result};
 use serialport::{SerialPort, SerialPortInfo};
 
 use crate::{
-    bus::{Bus, PushBus},
+    pushbus::PushBus,
     connection::{Connection, ConnectionFactory, DeviceDescriptor, ProtocolDescriptor},
     packet::J1939Packet,
 };
@@ -19,7 +19,7 @@ pub const CAN_SPEEDS: [Speed; 9] = [10, 20, 50, 100, 125, 250, 500, 800, 1000];
 
 #[derive(Clone)]
 pub struct Slcan {
-    bus: Box<dyn Bus<J1939Packet>>,
+    bus: PushBus<J1939Packet>,
     outbound: Arc<Mutex<VecDeque<String>>>,
     running: Arc<AtomicBool>,
     start: SystemTime,
@@ -39,7 +39,7 @@ impl Slcan {
         port.clear(serialport::ClearBuffer::All)?;
 
         let slcan = Slcan {
-            bus: Box::new(PushBus::new()),
+            bus: PushBus::new(),
             outbound: Arc::new(Mutex::new(VecDeque::new())),
             running: Arc::new(AtomicBool::new(true)),
             start: SystemTime::now(),
