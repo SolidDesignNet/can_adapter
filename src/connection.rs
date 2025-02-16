@@ -30,6 +30,25 @@ use crate::socketcanconnection;
 /// }
 /// ```
 
+impl IntoIterator for &mut dyn Connection {
+    type Item = Option<J1939Packet>;
+
+    type IntoIter = Box<dyn Iterator<Item = Option<J1939Packet>> + Send + Sync>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
+    }
+}
+impl IntoIterator for &dyn Connection {
+    type Item = Option<J1939Packet>;
+
+    type IntoIter = Box<dyn Iterator<Item = Option<J1939Packet>> + Send + Sync>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
+    }
+}
+
 pub trait Connection: Send + Sync {
     /// Send packet on CAN adapter
     fn send(&mut self, packet: &J1939Packet) -> Result<J1939Packet, anyhow::Error>;

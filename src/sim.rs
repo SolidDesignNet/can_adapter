@@ -4,9 +4,9 @@ use std::sync::*;
 use std::thread::Builder;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use crate::pushbus::PushBus;
 use crate::connection::{Connection, ConnectionFactory, DeviceDescriptor, ProtocolDescriptor};
 use crate::packet::*;
+use crate::pushbus::PushBus;
 
 pub struct SimulatedConnection {
     bus: Box<PushBus<J1939Packet>>,
@@ -95,7 +95,8 @@ impl ConnectionFactory for SimulatedConnectionFactory {
 pub fn factory() -> Result<ProtocolDescriptor, anyhow::Error> {
     Ok(ProtocolDescriptor {
         name: "Simulation".to_string(),
-        instructions_url:"https://github.com/SolidDesignNet/j1939logger/blob/main/README.md".to_string(),
+        instructions_url: "https://github.com/SolidDesignNet/j1939logger/blob/main/README.md"
+            .to_string(),
         devices: vec![DeviceDescriptor {
             name: "one".to_string(),
             connections: vec![Box::new(SimulatedConnectionFactory {})],

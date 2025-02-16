@@ -33,6 +33,7 @@ pub struct PushBusIter<T> {
     running: Arc<AtomicBool>,
 }
 
+const SLEEP_DURATION: Duration = Duration::from_millis(1);
 impl<T> Iterator for PushBusIter<T> {
     /// That's right, `Option<Option<Packet>>`
     /// None is closed
@@ -50,7 +51,7 @@ impl<T> Iterator for PushBusIter<T> {
         }
         // this means there was an empty response from poll()
         // sleep to avoid busy spinning
-        thread::sleep(Duration::from_millis(1));
+        thread::sleep(SLEEP_DURATION);
         return Some(None);
     }
 }

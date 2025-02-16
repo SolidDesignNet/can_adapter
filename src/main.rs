@@ -1,13 +1,14 @@
-use std::{ops::Deref, time::Duration};
+use std::time::{Duration, Instant};
 
+use anyhow::Result;
 use clap::{Parser, Subcommand};
 use connection::Connection;
 use packet::J1939Packet;
 use slcan::Slcan;
 
-pub mod pushbus;
 pub mod connection;
 pub mod packet;
+pub mod pushbus;
 pub mod sim;
 pub mod slcan;
 
@@ -22,25 +23,56 @@ pub mod socketcanconnection;
 use socketcanconnection::SocketCanConnection;
 
 #[derive(Parser, Debug, Default, Clone)]
-pub struct ThisCli {
-    #[command(flatten)]
-    args: Cli,
+enum Command {
+    #[command(skip)]
+    #[default]
+    None,
 
-    /// before logging demonstrate reading VIN
-    #[arg(long)]
-    vin: bool,
+    #[command()]
+    /// Dump Vector ASC compatible log to stdout.
+    Log {
+        #[command(flatten)]
+        connection: ConnectionFactory,
+    },
+
+    #[command()]
+    /// Used for testing.  Requires another instance to send or ping this source address.
+    Server {
+        #[command(flatten)]
+        connection: ConnectionFactory,
+    },
+
+    #[command()]
+    /// Latency test. Ping [da] with as many requests as it will respond to.
+    Ping {
+        #[command(flatten)]
+        connection: ConnectionFactory,
+
+        #[arg(long="da", short('d'), default_value = "00",value_parser=hex8)]
+        /// Adapter Address (used for packets send and transport protocol)
+        destination_address: u8,
+    },
+
+    #[command()]
+    /// Bandidth test.  Send as much data to [da] with as many requests as it will respond to.
+    Send {
+        #[command(flatten)]
+        connection: ConnectionFactory,
+
+        // Destination Address
+        #[arg(long="da", short('d'), default_value = "00",value_parser=hex8)]
+        destination_address: u8,
+    },
+
+    #[command()]
+    /// Read the VIN.
+    VIN {
+        #[command(flatten)]
+        connection: ConnectionFactory,
+    },
 }
-
-impl Deref for ThisCli {
-    type Target = Cli;
-
-    fn deref(&self) -> &Self::Target {
-        &self.args
-    }
-}
-
 #[derive(Parser, Debug, Default, Clone)]
-pub struct Cli {
+pub struct ConnectionFactory {
     #[command(subcommand)]
     pub connection: Descriptors,
 
@@ -98,7 +130,7 @@ pub enum Descriptors {
     },
 }
 
-impl Cli {
+impl ConnectionFactory {
     fn connect(&self) -> Result<Box<dyn Connection>, anyhow::Error> {
         eprintln!("connecting {:?}", self.connection);
         match &self.connection {
@@ -147,69 +179,234 @@ fn hex8(str: &str) -> Result<u8, std::num::ParseIntError> {
     u8::from_str_radix(str, 16)
 }
 
-pub fn main() -> Result<(), anyhow::Error> {
+pub fn main() -> Result<()> {
     // open the adapter
-    let args = ThisCli::parse();
-    let mut connection = args.connect()?;
-    if args.vin {
-        {
-            eprintln!("request VIN from ECM");
-            // start collecting packets
-            let packets = connection.iter_for(Duration::from_secs(5));
-            // send request for VIN
-            connection.send(&J1939Packet::new(None, 1, 0x18EA00F9, &[0xEC, 0xFE, 0x00]))?;
-
-            // filter for ECM result
-            packets
-                .filter(|p| {
-                    p.pgn() == 0xFEEC
-                        || [0xEA00, 0xEB00, 0xEC00, 0xE800].contains(&(p.pgn() & 0xFF00))
-                })
-                .map(|p| {
-                    eprintln!("   {p}");
-                    p
-                })
-                .find(|p| p.pgn() == 0xFEEC && p.source() == 0)
-                // log the VIN
-                .map(|p| {
-                    println!(
-                        "ECM {:02X} VIN: {}\n{}",
-                        p.source(),
-                        String::from_utf8(p.data().into()).unwrap(),
-                        p
-                    )
-                });
+    match Command::parse() {
+        Command::None => todo!(),
+        Command::Server { connection } => {
+            server(connection.connect()?.as_mut(), connection.source_address)?;
         }
-        {
-            eprintln!("\nrequest VIN from Broadcast");
-            // start collecting packets
-            let packets = connection.iter_for(Duration::from_secs(5));
-
-            // send request for VIN
-            connection.send(&J1939Packet::new(None, 1, 0x18EAFFF9, &[0xEC, 0xFE, 0x00]))?;
-            // filter for all results
-            packets
-                .filter(|p| p.pgn() == 0xFEEC || p.pgn() == 0xEAFF || p.pgn() & 0xFF00 == 0xE800)
-                .map(|p| {
-                    eprintln!("   {p}");
-                    p
-                })
-                // log the VINs
-                .filter(|p| p.pgn() == 0xFEEC)
-                .for_each(|p| {
-                    println!(
-                        "SA: {:02X} VIN: {}",
-                        p.source(),
-                        String::from_utf8(p.data().into()).unwrap()
-                    )
-                });
+        Command::Ping {
+            connection,
+            destination_address,
+        } => {
+            ping(
+                connection.connect()?.as_mut(),
+                connection.source_address,
+                destination_address,
+            )?;
+        }
+        Command::Send {
+            connection,
+            destination_address,
+        } => {
+            send(
+                connection.connect()?.as_mut(),
+                connection.source_address,
+                destination_address,
+            )?;
+        }
+        Command::VIN { connection } => {
+            vin(connection.connect()?.as_mut(), connection.source_address)?;
+        }
+        Command::Log { connection } => {
+            log(connection.connect()?.as_mut())?;
         }
     }
+    Ok(())
+}
 
+const PING_PGN: u32 = 0xFF00;
+const SEND_PGN: u32 = 0xFF01;
+
+fn send(
+    connection: &mut dyn Connection,
+    source_address: u8,
+    destination_address: u8,
+) -> Result<()> {
+    let mut sequence: u64 = 0;
+    loop {
+        let p = J1939Packet::new_packet(
+            None,
+            1,
+            6,
+            SEND_PGN,
+            destination_address,
+            source_address,
+            &sequence.to_be_bytes(),
+        );
+        connection.send(&p)?;
+        sequence += 1;
+    }
+}
+
+fn ping(
+    connection: &mut dyn Connection,
+    source_address: u8,
+    destination_address: u8,
+) -> Result<()> {
+    let mut sequence: u64 = 0;
+    let mut complete: u64 = 0;
+    let mut last_report = Instant::now();
+    let start = last_report;
+    loop {
+        let p = J1939Packet::new_packet(
+            None,
+            1,
+            6,
+            PING_PGN,
+            destination_address,
+            source_address,
+            &sequence.to_be_bytes(),
+        );
+        let mut i = connection.iter_for(Duration::from_secs(1));
+        connection.send(&p)?;
+        if i.find(|p| p.pgn() == PING_PGN && p.source() == destination_address)
+            .is_some()
+        {
+            complete += 1;
+        } else {
+            eprintln!("FAIL: {p}");
+        }
+        sequence += 1;
+        let now = Instant::now();
+        if now - last_report > Duration::from_secs(1) {
+            eprintln!(
+                "{} {complete}/{sequence}",
+                now.duration_since(start).as_millis()
+            );
+            last_report = now;
+        }
+    }
+}
+
+fn server(connection: &mut dyn Connection, sa: u8) -> Result<()> {
+    let mut count: i64 = 0;
+    let mut prev: i64 = 0;
+    let stream = connection.iter().filter_map(|o| {
+        if let Some(p) = o {
+            if p.source() != sa {
+                Some(p)
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    });
+
+    for p in stream {
+        if p.pgn() == PING_PGN {
+            count += 1;
+            let pong = &J1939Packet::new_packet(None, 1, 6, PING_PGN, p.source(), sa, p.data());
+            if count % 10_000 == 0 {
+                eprintln!("pong: {p} -> {pong}");
+            }
+            connection.send(pong)?;
+        } else if p.pgn() == SEND_PGN {
+            count += 1;
+            let this = {
+                let mut arr = [0u8; 8];
+                arr.copy_from_slice(&p.data());
+                i64::from_be_bytes(arr)
+            };
+            if prev + 1 != this {
+                let diff = this - prev;
+                eprintln!(" prev: {diff} {prev:X} {p}");
+            }
+            prev = this;
+            if count % 1_000 == 0 {
+                eprintln!("send {count:X} {p}");
+                connection.send(&J1939Packet::new_packet(
+                    None,
+                    1,
+                    6,
+                    SEND_PGN,
+                    p.source(),
+                    sa,
+                    &count.to_be_bytes(),
+                ))?;
+            }
+        }
+    }
+    Ok(())
+}
+
+fn vin(connection: &mut dyn Connection, source_address: u8) -> Result<()> {
+    {
+        eprintln!("request VIN from ECM");
+        // start collecting packets
+        let packets = connection.iter_for(Duration::from_secs(5));
+        // send request for VIN
+        connection.send(&J1939Packet::new_packet(
+            None,
+            1,
+            6,
+            0xEA00,
+            0,
+            source_address,
+            &[0xEC, 0xFE, 0x00],
+        ))?;
+
+        // filter for ECM result
+        packets
+            .filter(|p| {
+                p.pgn() == 0xFEEC || [0xEA00, 0xEB00, 0xEC00, 0xE800].contains(&(p.pgn() & 0xFF00))
+            })
+            .map(|p| {
+                eprintln!("   {p}");
+                p
+            })
+            .find(|p| p.pgn() == 0xFEEC && p.source() == 0)
+            // log the VIN
+            .map(|p| {
+                println!(
+                    "ECM {:02X} VIN: {}\n{}",
+                    p.source(),
+                    String::from_utf8(p.data().into()).unwrap(),
+                    p
+                )
+            });
+    }
+    Ok({
+        eprintln!("\nrequest VIN from Broadcast");
+        // start collecting packets
+        let packets = connection.iter_for(Duration::from_secs(5));
+
+        // send request for VIN
+        connection.send(&J1939Packet::new_packet(
+            None,
+            1,
+            6,
+            0xEAFF,
+            0xFF,
+            source_address,
+            &[0xEC, 0xFE, 0x00],
+        ))?;
+        // filter for all results
+        packets
+            .filter(|p| p.pgn() == 0xFEEC || p.pgn() == 0xEAFF || p.pgn() & 0xFF00 == 0xE800)
+            .map(|p| {
+                eprintln!("   {p}");
+                p
+            })
+            // log the VINs
+            .filter(|p| p.pgn() == 0xFEEC)
+            .for_each(|p| {
+                println!(
+                    "SA: {:02X} VIN: {}",
+                    p.source(),
+                    String::from_utf8(p.data().into()).unwrap()
+                )
+            });
+    })
+}
+
+fn log(connection: &dyn Connection) -> Result<()> {
     eprintln!("\n\nlog everything for the next 30 days");
     connection
         .iter()
-        .filter_map(|p|p) //_for(Duration::from_secs(60 * 60 * 24 * 30))
+        .filter_map(|p| p) //_for(Duration::from_secs(60 * 60 * 24 * 30))
         .for_each(|p| println!("{p}"));
     Ok(())
 }

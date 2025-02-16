@@ -9,9 +9,9 @@ use anyhow::{Error, Result};
 use serialport::{SerialPort, SerialPortInfo};
 
 use crate::{
-    pushbus::PushBus,
     connection::{Connection, ConnectionFactory, DeviceDescriptor, ProtocolDescriptor},
     packet::J1939Packet,
+    pushbus::PushBus,
 };
 
 type Speed = u32;
@@ -25,14 +25,15 @@ pub struct Slcan {
     start: SystemTime,
 }
 
-const TIMEOUT: Duration = Duration::from_secs(1);
+const ONE_SEC: Duration = Duration::from_secs(1);
+const ONE_MILLI: Duration = Duration::from_secs(1);
 
 impl Slcan {
     pub fn new(port_name: &str, speed: u32) -> Result<Slcan> {
         eprintln!("opening {port_name}");
         let mut port = serialport::new(port_name, 1_000_000)
-            .timeout(TIMEOUT)
-            .flow_control(serialport::FlowControl::None)
+            .timeout(ONE_SEC)
+            .flow_control(serialport::FlowControl::Hardware)
             .dtr_on_open(true)
             .open()?;
 
@@ -76,7 +77,6 @@ impl Slcan {
     }
 
     fn to_can(&self, mut port: Box<dyn SerialPort>) {
-        let one_milli = Duration::from_millis(1);
         while self.running.load(std::sync::atomic::Ordering::Relaxed) {
             // tx
             let packet = self.outbound.lock().unwrap().pop_front();
@@ -89,15 +89,13 @@ impl Slcan {
                     port.flush().expect("Unable to flush serialport.");
                 }
                 None => {
-                    thread::sleep(one_milli);
+                    thread::sleep(ONE_MILLI);
                 }
             }
         }
         port.write_all(b"C\r")
             .expect("Unable to write C to serialport.");
         port.flush().expect("Unable to flush serialport.");
-
-        eprintln!("to_can: closed");
     }
 
     fn from_can(&mut self, mut port: Box<dyn SerialPort>) {
@@ -107,32 +105,34 @@ impl Slcan {
         // copy line from vecdeque to vec
         // parse string into byte[]
 
-        let mut buf = [0; 64];
+        let mut buf = [0; 1024];
         let mut q = VecDeque::new();
 
         while self.running.load(std::sync::atomic::Ordering::Relaxed) {
-            let len = port.read(&mut buf);
-            match len {
+            // not spinning, because port.read() is blocking
+            match port.read(&mut buf) {
                 Ok(len) => {
-                    q.extend(buf[..len].into_iter());
-
-                    let index = q.iter().take_while(|u| **u != b'\r').count();
-                    if index == 0 {
-                        q.pop_front();
-                    } else if index < q.len() {
-                        let vec: Vec<u8> = q.drain(..index).collect();
-                        let line: String = String::from_utf8(vec).expect("Invalid UTF8");
-                        self.bus.push(parse_result(self.now(), line).ok());
+                    if len > 0 {
+                        q.extend(buf[..len].into_iter());
+                        loop {
+                            let index = q.iter().take_while(|u| **u != b'\r').count();
+                            if index < q.len() {
+                                let vec: Vec<u8> = q.drain(..index).collect();
+                                let line: String = String::from_utf8(vec).expect("Invalid UTF8");
+                                self.bus.push(parse_result(self.now(), line).ok());
+                                q.pop_front(); // drop \r
+                            } else {
+                                break;
+                                // no \r
+                            }
+                        }
                     }
                 }
                 Err(e) => {
                     eprintln!("{e}");
-                    // not spinning, because port.read() is blocking
                 }
             }
         }
-
-        eprintln!("from_can: closed");
     }
 }
 
@@ -146,14 +146,12 @@ fn send_cmd(port: &mut Box<dyn SerialPort>, cmd: &[u8]) -> Result<()> {
 
 impl Drop for Slcan {
     fn drop(&mut self) {
-        eprintln!("drop slcan");
         if self.running.load(std::sync::atomic::Ordering::Relaxed) {
             self.running
                 .store(false, std::sync::atomic::Ordering::Relaxed);
             self.bus.close();
             // give Windows time to clean up device
-            thread::sleep(TIMEOUT * 2);
-            eprintln!("dropped slcan");
+            //            thread::sleep(TIMEOUT * 2);
         }
     }
 }
@@ -164,7 +162,7 @@ fn parse_result(now: u32, buf: String) -> Result<J1939Packet> {
     let len = buf.len();
     // {T}{4 * 2 digit hex bytes}{1 digit length}{2 digit hex payload}
     if len < SIZE || len % 2 != 0 {
-        let message = format!("Invalid buf {buf} len:{len} {}", len % 2);
+        let message = format!("Invalid buf [{buf}] len:{len} {}", len % 2);
         eprintln!("{}", message);
         return Err(Error::msg(message));
     }
@@ -190,12 +188,10 @@ impl Connection for Slcan {
         //let mut i = self.iter_for(Duration::from_millis(2_000));
 
         // send packet
-        {
-            let p = unparse(packet);
-            eprintln!("enqueuing: {p}");
-            let mut q = self.outbound.lock().unwrap();
-            q.push_back(p);
-        }
+
+        let p = unparse(packet);
+        self.outbound.lock().unwrap().push_back(p);
+
         self.bus.push(Some(packet.clone()));
         // FIXME
         // i.find(

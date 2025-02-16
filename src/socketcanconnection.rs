@@ -7,6 +7,7 @@ use socketcan::Socket;
 
 use socketcan::CanSocket;
 use socketcan::SocketOptions;
+use std::io::Write;
 use std::option::Option;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
@@ -16,18 +17,18 @@ use std::thread;
 use std::time::Duration;
 use std::time::SystemTime;
 
-use crate::pushbus::PushBus;
 use crate::connection::Connection;
 use crate::connection::ConnectionFactory;
 use crate::connection::DeviceDescriptor;
 use crate::connection::ProtocolDescriptor;
 use crate::packet::J1939Packet;
+use crate::pushbus::PushBus;
 
 /// ```sh
 ///   ip link set can0 up
 ///   ip link set can0 type can bitrate 500000
 /// ```
-/// 
+///
 /// PEAK:
 /// ```
 /// sudo bash -xc 'rmmod peak_usb && modprobe peak_usb && ipslink set can0 name peak && ip link set peak type can bitrate 500000 && ip link set peak up'
@@ -49,12 +50,15 @@ impl SocketCanConnection {
             running: Arc::new(AtomicBool::new(false)),
             start: SystemTime::now(),
         };
+
         let mut scc = socket_can_connection.clone();
         {
-            // FIXME doesn't work with PEAK for me
             let can_socket = scc.socket.lock().unwrap();
             can_socket.set_loopback(true)?;
             can_socket.set_recv_own_msgs(true)?;
+            can_socket.set_nonblocking(false)?;
+            can_socket.set_read_timeout(Duration::from_millis(50))?;
+            can_socket.set_write_timeout(Duration::from_millis(500))?;
         }
         thread::spawn(move || scc.run());
         Ok(socket_can_connection)
@@ -62,7 +66,6 @@ impl SocketCanConnection {
     fn run(&mut self) {
         self.running.store(true, Ordering::Relaxed);
         while self.running.load(Ordering::Relaxed) {
-            // FIXME should probably be read_frame, not raw
             let read_raw_frame = self.socket.lock().unwrap().read_raw_frame();
             let p = if read_raw_frame.is_ok() {
                 let frame = read_raw_frame.unwrap();
@@ -77,7 +80,8 @@ impl SocketCanConnection {
                     &frame.data[..len],
                 ))
             } else {
-                std::thread::sleep(Duration::from_millis(100));
+                const ONE_MILLI: Duration = Duration::from_millis(1);
+                std::thread::sleep(ONE_MILLI);
                 None
             };
             self.bus.push(p);
@@ -94,14 +98,21 @@ impl SocketCanConnection {
 impl Connection for SocketCanConnection {
     fn send(&mut self, packet: &J1939Packet) -> Result<J1939Packet, anyhow::Error> {
         // listen for echo
-        let mut i = self.iter_for(Duration::from_millis(50));
+        let mut i = self.iter_for(Duration::from_millis(1000));
 
         // send packet
-        let frame = CanFrame::from_raw_id(packet.id(), packet.data()).expect("Invalid data packet");
-        self.socket.lock().unwrap().write_frame(&frame)?;
-
-        let p = J1939Packet::new_socketcan(self.now(), true, packet.id(), packet.data());
-        self.bus.push(Some(p));
+        {
+            let frame = CanFrame::from_raw_id(packet.id(), packet.data()).expect("Invalid data packet");
+            let mut can_socket = self.socket.lock().unwrap();
+            can_socket.write_frame(&frame)?;
+            can_socket.flush()?;
+        }
+        self.bus.push(Some(J1939Packet::new_socketcan(
+            self.now(),
+            true,
+            packet.id(),
+            packet.data(),
+        )));
 
         i.find(
             move |p| p.id() == packet.id(), /*&& p.data() == packet.data()*/
