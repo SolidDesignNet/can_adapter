@@ -67,16 +67,28 @@ impl<T: Send + Sync + 'static + Clone> PushBus<T> {
     }
 
     pub fn push(&mut self, item: Option<T>) {
-        self.iters
-            .lock()
-            .unwrap()
-            .iter_mut()
-            .for_each(|i| i.data.lock().unwrap().push_back(item.clone()));
+        let mut iters = self.iters.lock().unwrap();
+        // remove closed iterators.
+        iters.retain(|i| i.running.load(std::sync::atomic::Ordering::Relaxed));
+        iters.iter_mut().for_each(|i| {
+            let mut items = i.data.lock().unwrap();
+            let len = items.len();
+            if len > 1000 {
+                eprintln!("pushbus too deep: {len}");
+            }
+            items.push_back(item.clone())
+        });
     }
 }
 
 impl<T> Drop for PushBus<T> {
     fn drop(&mut self) {
         self.close();
+    }
+}
+impl<T> Drop for PushBusIter<T> {
+    fn drop(&mut self) {
+        self.running
+            .store(false, std::sync::atomic::Ordering::Relaxed);
     }
 }

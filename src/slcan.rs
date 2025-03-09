@@ -5,7 +5,7 @@ use std::{
     time::{Duration, SystemTime},
 };
 
-use anyhow::{Error, Result};
+use anyhow::{Context, Error, Result};
 use serialport::{SerialPort, SerialPortInfo};
 
 use crate::{
@@ -25,14 +25,13 @@ pub struct Slcan {
     start: SystemTime,
 }
 
-const ONE_SEC: Duration = Duration::from_secs(1);
-const ONE_MILLI: Duration = Duration::from_secs(1);
+const ONE_MILLI: Duration = Duration::from_millis(1);
 
 impl Slcan {
     pub fn new(port_name: &str, speed: u32) -> Result<Slcan> {
         eprintln!("opening {port_name}");
         let mut port = serialport::new(port_name, 1_000_000)
-            .timeout(ONE_SEC)
+            .timeout(ONE_MILLI)
             .flow_control(serialport::FlowControl::Hardware)
             .dtr_on_open(true)
             .open()?;
@@ -46,13 +45,6 @@ impl Slcan {
             start: SystemTime::now(),
         };
 
-        // read all packets
-        {
-            let mut slcan = slcan.clone();
-            let port = port.try_clone()?;
-            thread::spawn(move || slcan.from_can(port));
-        }
-
         send_cmd(&mut port, b"C")?;
         send_cmd(&mut port, b"C")?;
         send_cmd(&mut port, b"V")?;
@@ -62,8 +54,8 @@ impl Slcan {
 
         // write outbound packets
         {
-            let slcan = slcan.clone();
-            thread::spawn(move || slcan.to_can(port));
+            let mut slcan = slcan.clone();
+            thread::spawn(move || slcan.run_can(port));
         }
 
         eprintln!(" opened {port_name}");
@@ -76,29 +68,7 @@ impl Slcan {
             .as_millis() as u32
     }
 
-    fn to_can(&self, mut port: Box<dyn SerialPort>) {
-        while self.running.load(std::sync::atomic::Ordering::Relaxed) {
-            // tx
-            let packet = self.outbound.lock().unwrap().pop_front();
-            match packet {
-                Some(p) => {
-                    port.write_all(&p.as_bytes())
-                        .expect("Unable to write to serialport.");
-                    port.write_all(b"\r")
-                        .expect("Unable to write CR to serialport.");
-                    port.flush().expect("Unable to flush serialport.");
-                }
-                None => {
-                    thread::sleep(ONE_MILLI);
-                }
-            }
-        }
-        port.write_all(b"C\r")
-            .expect("Unable to write C to serialport.");
-        port.flush().expect("Unable to flush serialport.");
-    }
-
-    fn from_can(&mut self, mut port: Box<dyn SerialPort>) {
+    fn run_can(&mut self, mut port: Box<dyn SerialPort>) {
         // gross
         // copy from port to buf
         // copy from buf vecdeque
@@ -109,6 +79,23 @@ impl Slcan {
         let mut q = VecDeque::new();
 
         while self.running.load(std::sync::atomic::Ordering::Relaxed) {
+            // tx
+            {
+                let mut items = self.outbound.lock().unwrap();
+
+                let packet = items.pop_front();
+                match packet {
+                    Some(p) => {
+                        port.write_all(&p.as_bytes())
+                            .expect("Unable to write to serialport.");
+                        port.write_all(b"\r")
+                            .expect("Unable to write CR to serialport.");
+                        port.flush().expect("Unable to flush serialport.");
+                    }
+                    None => {}
+                }
+            }
+            // rx
             // not spinning, because port.read() is blocking
             match port.read(&mut buf) {
                 Ok(len) => {
@@ -128,8 +115,8 @@ impl Slcan {
                         }
                     }
                 }
-                Err(e) => {
-                    eprintln!("{e}");
+                Err(_error) => {
+                    //   eprintln!("{_error}");
                 }
             }
         }
@@ -185,20 +172,33 @@ impl Connection for Slcan {
         packet: &crate::packet::J1939Packet,
     ) -> anyhow::Result<crate::packet::J1939Packet> {
         // listen for echo
-        //let mut i = self.iter_for(Duration::from_millis(2_000));
+        #[cfg(slcan_echo)]
+        let mut echo_stream = self.iter_for(Duration::from_millis(2_000));
 
         // send packet
-
         let p = unparse(packet);
-        self.outbound.lock().unwrap().push_back(p);
+        {
+            let mut items = self.outbound.lock().unwrap();
+            let len = items.len();
+            if len > 200 {
+                eprintln!("queue too deep: {len}");
+            }
+            items.push_back(p);
+        }
 
-        self.bus.push(Some(packet.clone()));
-        // FIXME
-        // i.find(
-        //     move |p| p.id() == packet.id(), /*&& p.data() == packet.data()*/
-        // )
-        // .context("no echo")
-        Ok(packet.clone())
+        // return echo
+        #[cfg(slcan_echo)]
+        let r = echo_stream
+            .find(
+                move |p| p.id() == packet.id(), /*&& p.data() == packet.data()*/
+            )
+            .context("no echo");
+        #[cfg(not(slcan_echo))]
+        let r = {
+            self.bus.push(Some(packet.clone()));
+            Ok(packet.clone())
+        };
+        r
     }
 
     fn iter(&self) -> Box<dyn Iterator<Item = Option<crate::packet::J1939Packet>> + Send + Sync> {
