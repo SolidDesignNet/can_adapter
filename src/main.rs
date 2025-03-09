@@ -1,4 +1,4 @@
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
@@ -283,6 +283,7 @@ fn ping(
 fn server(connection: &mut dyn Connection, sa: u8) -> Result<()> {
     let mut count: i64 = 0;
     let mut prev: i64 = 0;
+    let mut prev_time: SystemTime = SystemTime::now();
     let stream = connection.iter().filter_map(|o| {
         if let Some(p) = o {
             if p.source() != sa {
@@ -312,11 +313,14 @@ fn server(connection: &mut dyn Connection, sa: u8) -> Result<()> {
             };
             if prev + 1 != this {
                 let diff = this - prev;
-                eprintln!(" prev: {diff} {prev:X} {p}");
+                eprintln!("skipped: {diff} prev: {prev:X} this: {this:X} packet: {p}");
             }
             prev = this;
             if count % 1_000 == 0 {
-                eprintln!("send {count:X} {p}");
+                let now = SystemTime::now();
+                let rate = 1000.0 / now.duration_since(prev_time)?.as_secs_f64();
+                eprintln!("send count: {count} rate: {rate} packet/s");
+                prev_time = now;
                 connection.send(&J1939Packet::new_packet(
                     None,
                     1,

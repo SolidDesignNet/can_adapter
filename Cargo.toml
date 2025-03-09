@@ -28,6 +28,3 @@ serialport="4.7.0"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 socketcan = { version = "3.5.0", features = ["enumerate"] }
-
-[features]
-slcan_echo=[]

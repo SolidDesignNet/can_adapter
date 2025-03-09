@@ -171,34 +171,16 @@ impl Connection for Slcan {
         &mut self,
         packet: &crate::packet::J1939Packet,
     ) -> anyhow::Result<crate::packet::J1939Packet> {
-        // listen for echo
-        #[cfg(slcan_echo)]
-        let mut echo_stream = self.iter_for(Duration::from_millis(2_000));
-
         // send packet
-        let p = unparse(packet);
-        {
-            let mut items = self.outbound.lock().unwrap();
-            let len = items.len();
-            if len > 200 {
-                eprintln!("queue too deep: {len}");
-            }
-            items.push_back(p);
+        self.outbound.lock().unwrap().push_back(unparse(packet));
+
+        // SLCAN does not support echo, so wait until outbound is empty;
+        while !self.outbound.lock().unwrap().is_empty() {
+            thread::sleep(ONE_MILLI);
         }
 
-        // return echo
-        #[cfg(slcan_echo)]
-        let r = echo_stream
-            .find(
-                move |p| p.id() == packet.id(), /*&& p.data() == packet.data()*/
-            )
-            .context("no echo");
-        #[cfg(not(slcan_echo))]
-        let r = {
-            self.bus.push(Some(packet.clone()));
-            Ok(packet.clone())
-        };
-        r
+        self.bus.push(Some(packet.clone()));
+        Ok(packet.clone())
     }
 
     fn iter(&self) -> Box<dyn Iterator<Item = Option<crate::packet::J1939Packet>> + Send + Sync> {
