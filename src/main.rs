@@ -2,6 +2,7 @@ use std::time::{Duration, Instant, SystemTime};
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
+use clap_num::maybe_hex;
 use connection::Connection;
 use packet::J1939Packet;
 use slcan::Slcan;
@@ -54,8 +55,8 @@ enum Command {
     },
 
     #[command()]
-    /// Bandidth test.  Send as much data to [da] with as many requests as it will respond to.
-    Send {
+    /// Bandwidth test.  Send as much data to [da] with as many requests as it will respond to.
+    Bandwidth {
         #[command(flatten)]
         connection: ConnectionFactory,
 
@@ -63,7 +64,16 @@ enum Command {
         #[arg(long="da", short('d'), default_value = "00",value_parser=hex8)]
         destination_address: u8,
     },
+    Send {
+        #[command(flatten)]
+        connection: ConnectionFactory,
 
+        // ID
+        #[clap( value_parser=maybe_hex::<u32>)]
+        id: u32,
+        #[clap( value_parser=maybe_hex::<u64>)]
+        payload: u64,
+    },
     #[command()]
     /// Read the VIN.
     VIN {
@@ -139,7 +149,7 @@ impl ConnectionFactory {
             Descriptors::J2534 {} => todo!(),
             #[cfg(target_os = "linux")]
             Descriptors::SocketCan { dev, speed } => {
-                Ok(Box::new(SocketCanConnection::new(&dev, *speed)?) as Box<dyn Connection>)
+                Ok(Box::new(SocketCanConnection::new(dev, *speed)?) as Box<dyn Connection>)
             }
             Descriptors::SLCAN { port, speed } => Ok(Box::new(Slcan::new(port, *speed)?)),
             #[cfg(windows)]
@@ -198,9 +208,16 @@ pub fn main() -> Result<()> {
         }
         Command::Send {
             connection,
+            id,
+            payload,
+        } => {
+            send(connection.connect()?.as_mut(), id, &payload.to_be_bytes())?;
+        }
+        Command::Bandwidth {
+            connection,
             destination_address,
         } => {
-            send(
+            bandwidth(
                 connection.connect()?.as_mut(),
                 connection.source_address,
                 destination_address,
@@ -216,10 +233,20 @@ pub fn main() -> Result<()> {
     Ok(())
 }
 
+fn send(
+    connection: &mut (dyn Connection + 'static),
+    id: u32,
+    payload: &[u8],
+) -> Result<()> {
+    let packet = J1939Packet::new(None,1, id, payload);
+    connection.send(&packet)?;
+    Ok(())
+}
+
 const PING_PGN: u32 = 0xFF00;
 const SEND_PGN: u32 = 0xFF01;
 
-fn send(
+fn bandwidth(
     connection: &mut dyn Connection,
     source_address: u8,
     destination_address: u8,
@@ -261,8 +288,7 @@ fn ping(
         );
         let mut i = connection.iter_for(Duration::from_secs(1));
         connection.send(&p)?;
-        if i.find(|p| p.pgn() == PING_PGN && p.source() == destination_address)
-            .is_some()
+        if i.any(|p| p.pgn() == PING_PGN && p.source() == destination_address)
         {
             complete += 1;
         } else {
@@ -285,15 +311,7 @@ fn server(connection: &mut dyn Connection, sa: u8) -> Result<()> {
     let mut prev: i64 = 0;
     let mut prev_time: SystemTime = SystemTime::now();
     let stream = connection.iter().filter_map(|o| {
-        if let Some(p) = o {
-            if p.source() != sa {
-                Some(p)
-            } else {
-                None
-            }
-        } else {
-            None
-        }
+        o.filter(|p| p.source() != sa)
     });
 
     for p in stream {
