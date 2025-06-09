@@ -5,7 +5,7 @@ use std::{
     time::{Duration, SystemTime},
 };
 
-use anyhow::{Context, Error, Result};
+use anyhow::{Error, Result};
 use serialport::{SerialPort, SerialPortInfo};
 
 use crate::{
@@ -39,7 +39,7 @@ impl Slcan {
         port.clear(serialport::ClearBuffer::All)?;
 
         let slcan = Slcan {
-            bus: PushBus::new(),
+            bus: PushBus::default(),
             outbound: Arc::new(Mutex::new(VecDeque::new())),
             running: Arc::new(AtomicBool::new(true)),
             start: SystemTime::now(),
@@ -49,7 +49,7 @@ impl Slcan {
         send_cmd(&mut port, b"C")?;
         send_cmd(&mut port, b"V")?;
         let speed_command = &format!("S{}", CAN_SPEEDS.binary_search(&speed).unwrap());
-        send_cmd(&mut port, &speed_command.as_bytes())?;
+        send_cmd(&mut port, speed_command.as_bytes())?;
         send_cmd(&mut port, b"O")?;
 
         // write outbound packets
@@ -84,15 +84,12 @@ impl Slcan {
                 let mut items = self.outbound.lock().unwrap();
 
                 let packet = items.pop_front();
-                match packet {
-                    Some(p) => {
-                        port.write_all(&p.as_bytes())
-                            .expect("Unable to write to serialport.");
-                        port.write_all(b"\r")
-                            .expect("Unable to write CR to serialport.");
-                        port.flush().expect("Unable to flush serialport.");
-                    }
-                    None => {}
+                if let Some(p) = packet {
+                    port.write_all(p.as_bytes())
+                        .expect("Unable to write to serialport.");
+                    port.write_all(b"\r")
+                        .expect("Unable to write CR to serialport.");
+                    port.flush().expect("Unable to flush serialport.");
                 }
             }
             // rx
@@ -100,7 +97,7 @@ impl Slcan {
             match port.read(&mut buf) {
                 Ok(len) => {
                     if len > 0 {
-                        q.extend(buf[..len].into_iter());
+                        q.extend(buf[..len].iter());
                         loop {
                             let index = q.iter().take_while(|u| **u != b'\r').count();
                             if index < q.len() {

@@ -14,7 +14,7 @@ pub struct SimulatedConnection {
 }
 impl SimulatedConnection {
     pub fn new() -> Result<SimulatedConnection> {
-        let bus = PushBus::new();
+        let bus = PushBus::default();
         let running = Arc::new(AtomicBool::new(false));
         {
             let running = running.clone();
@@ -37,7 +37,7 @@ fn run(running: Arc<AtomicBool>, mut bus: PushBus<J1939Packet>) {
         let packet = J1939Packet::new_packet(Some(now()), 0, 6, 0xFEF1, 0, 0x0, &seq.to_be_bytes());
         bus.push(Some(packet));
         std::thread::sleep(Duration::from_millis(100));
-        seq = seq + 1;
+        seq += 1;
     }
 }
 

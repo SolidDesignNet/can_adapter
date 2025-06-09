@@ -46,7 +46,7 @@ impl SocketCanConnection {
     pub fn new(str: &str, speed: u64) -> Result<SocketCanConnection, anyhow::Error> {
         let socket_can_connection = SocketCanConnection {
             socket: Arc::new(Mutex::new(CanSocket::open(str)?)),
-            bus: PushBus::new(),
+            bus: PushBus::default(),
             running: Arc::new(AtomicBool::new(false)),
             start: SystemTime::now(),
         };

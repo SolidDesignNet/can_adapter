@@ -31,7 +31,7 @@ impl Display for J1939Packet {
 }
 
 fn as_hex(data: &[u8]) -> String {
-    if data.len() == 0 {
+    if data.is_empty() {
         return "".to_string();
     }
     // FIXME optimize
@@ -53,6 +53,11 @@ fn as_hex_nospace(data: &[u8]) -> String {
 impl J1939Packet {
     pub fn len(&self) -> usize {
         self.payload.len()
+    }
+
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
     }
     pub fn time(&self) -> u32 {
         self.time
@@ -130,11 +135,11 @@ impl J1939Packet {
     }
 
     pub fn data_str(&self) -> String {
-        as_hex(&self.data())
+        as_hex(self.data())
     }
 
     pub fn data_str_nospace(&self) -> String {
-        as_hex_nospace(&self.data())
+        as_hex_nospace(self.data())
     }
 
     pub fn data(&self) -> &[u8] {

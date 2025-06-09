@@ -1,7 +1,7 @@
 use std::time::{Duration, Instant, SystemTime};
 
 use anyhow::Result;
-use clap::{Parser, Subcommand};
+use clap::{Args, Parser, Subcommand};
 use clap_num::maybe_hex;
 use connection::Connection;
 use packet::J1939Packet;
@@ -23,41 +23,32 @@ pub mod socketcanconnection;
 #[cfg(target_os = "linux")]
 use socketcanconnection::SocketCanConnection;
 
-#[derive(Parser, Debug, Default, Clone)]
-enum Command {
-    #[command(skip)]
-    #[default]
-    None,
+#[derive(Debug, Parser)] // requires `derive` feature
+#[command(name = "git")]
+#[command(about = "A fictional versioning CLI", long_about = None)]
+struct Cli {
+    #[command(subcommand)]
+    command: CanCommand,
+}
 
-    #[command()]
+#[derive(Subcommand, Debug, Clone)]
+enum CanCommand {
     /// Dump Vector ASC compatible log to stdout.
     Log {
-        #[command(flatten)]
         connection: ConnectionFactory,
     },
-
-    #[command()]
     /// Used for testing.  Requires another instance to send or ping this source address.
-    Server {
-        #[command(flatten)]
-        connection: ConnectionFactory,
-    },
-
-    #[command()]
+    Server { connection: ConnectionFactory },
     /// Latency test. Ping [da] with as many requests as it will respond to.
     Ping {
-        #[command(flatten)]
         connection: ConnectionFactory,
 
         #[arg(long="da", short('d'), default_value = "00",value_parser=hex8)]
         /// Adapter Address (used for packets send and transport protocol)
         destination_address: u8,
     },
-
-    #[command()]
     /// Bandwidth test.  Send as much data to [da] with as many requests as it will respond to.
     Bandwidth {
-        #[command(flatten)]
         connection: ConnectionFactory,
 
         // Destination Address
@@ -65,23 +56,19 @@ enum Command {
         destination_address: u8,
     },
     Send {
-        #[command(flatten)]
         connection: ConnectionFactory,
 
         // ID
-        #[clap( value_parser=maybe_hex::<u32>)]
+        #[arg( value_parser=maybe_hex::<u32>)]
         id: u32,
-        #[clap( value_parser=maybe_hex::<u64>)]
+        #[arg( value_parser=maybe_hex::<u64>)]
         payload: u64,
     },
-    #[command()]
     /// Read the VIN.
-    VIN {
-        #[command(flatten)]
-        connection: ConnectionFactory,
-    },
+    Vin { connection: ConnectionFactory },
 }
-#[derive(Parser, Debug, Default, Clone)]
+
+#[derive(Args, Debug, Default, Clone)]
 pub struct ConnectionFactory {
     #[command(subcommand)]
     pub connection: Descriptors,
@@ -93,6 +80,7 @@ pub struct ConnectionFactory {
     #[arg(long, short('v'), default_value = "false")]
     pub verbose: bool,
 }
+
 #[derive(Subcommand, Debug, Default, Clone)]
 pub enum Descriptors {
     #[default]
@@ -141,7 +129,7 @@ pub enum Descriptors {
 }
 
 impl ConnectionFactory {
-    fn connect(&self) -> Result<Box<dyn Connection>, anyhow::Error> {
+    pub fn connect(&self) -> Result<Box<dyn Connection>> {
         eprintln!("connecting {:?}", self.connection);
         match &self.connection {
             Descriptors::List => list_all(),
@@ -171,7 +159,7 @@ impl ConnectionFactory {
     }
 }
 
-fn list_all() -> ! {
+pub fn list_all() -> ! {
     for pd in connection::enumerate_connections().unwrap() {
         eprintln!("{}", pd.name);
         for dd in pd.devices {
@@ -191,12 +179,11 @@ fn hex8(str: &str) -> Result<u8, std::num::ParseIntError> {
 
 pub fn main() -> Result<()> {
     // open the adapter
-    match Command::parse() {
-        Command::None => todo!(),
-        Command::Server { connection } => {
+    match CanCommand::parse() {
+        CanCommand::Server { connection } => {
             server(connection.connect()?.as_mut(), connection.source_address)?;
         }
-        Command::Ping {
+        CanCommand::Ping {
             connection,
             destination_address,
         } => {
@@ -206,14 +193,14 @@ pub fn main() -> Result<()> {
                 destination_address,
             )?;
         }
-        Command::Send {
+        CanCommand::Send {
             connection,
             id,
             payload,
         } => {
             send(connection.connect()?.as_mut(), id, &payload.to_be_bytes())?;
         }
-        Command::Bandwidth {
+        CanCommand::Bandwidth {
             connection,
             destination_address,
         } => {
@@ -223,22 +210,18 @@ pub fn main() -> Result<()> {
                 destination_address,
             )?;
         }
-        Command::VIN { connection } => {
+        CanCommand::Vin { connection } => {
             vin(connection.connect()?.as_mut(), connection.source_address)?;
         }
-        Command::Log { connection } => {
+        CanCommand::Log { connection } => {
             log(connection.connect()?.as_mut())?;
         }
     }
     Ok(())
 }
 
-fn send(
-    connection: &mut (dyn Connection + 'static),
-    id: u32,
-    payload: &[u8],
-) -> Result<()> {
-    let packet = J1939Packet::new(None,1, id, payload);
+fn send(connection: &mut (dyn Connection + 'static), id: u32, payload: &[u8]) -> Result<()> {
+    let packet = J1939Packet::new(None, 1, id, payload);
     connection.send(&packet)?;
     Ok(())
 }
@@ -288,8 +271,7 @@ fn ping(
         );
         let mut i = connection.iter_for(Duration::from_secs(1));
         connection.send(&p)?;
-        if i.any(|p| p.pgn() == PING_PGN && p.source() == destination_address)
-        {
+        if i.any(|p| p.pgn() == PING_PGN && p.source() == destination_address) {
             complete += 1;
         } else {
             eprintln!("FAIL: {p}");
@@ -310,9 +292,9 @@ fn server(connection: &mut dyn Connection, sa: u8) -> Result<()> {
     let mut count: i64 = 0;
     let mut prev: i64 = 0;
     let mut prev_time: SystemTime = SystemTime::now();
-    let stream = connection.iter().filter_map(|o| {
-        o.filter(|p| p.source() != sa)
-    });
+    let stream = connection
+        .iter()
+        .filter_map(|o| o.filter(|p| p.source() != sa));
 
     for p in stream {
         if p.pgn() == PING_PGN {
@@ -326,7 +308,7 @@ fn server(connection: &mut dyn Connection, sa: u8) -> Result<()> {
             count += 1;
             let this = {
                 let mut arr = [0u8; 8];
-                arr.copy_from_slice(&p.data());
+                arr.copy_from_slice(p.data());
                 i64::from_be_bytes(arr)
             };
             if prev + 1 != this {
@@ -371,7 +353,7 @@ fn vin(connection: &mut dyn Connection, source_address: u8) -> Result<()> {
         ))?;
 
         // filter for ECM result
-        packets
+        if let Some(p) = packets
             .filter(|p| {
                 p.pgn() == 0xFEEC || [0xEA00, 0xEB00, 0xEC00, 0xE800].contains(&(p.pgn() & 0xFF00))
             })
@@ -380,17 +362,16 @@ fn vin(connection: &mut dyn Connection, source_address: u8) -> Result<()> {
                 p
             })
             .find(|p| p.pgn() == 0xFEEC && p.source() == 0)
-            // log the VIN
-            .map(|p| {
-                println!(
-                    "ECM {:02X} VIN: {}\n{}",
-                    p.source(),
-                    String::from_utf8(p.data().into()).unwrap(),
-                    p
-                )
-            });
+        {
+            println!(
+                "ECM {:02X} VIN: {}\n{}",
+                p.source(),
+                String::from_utf8(p.data().into()).unwrap(),
+                p
+            )
+        }
     }
-    Ok({
+    {
         eprintln!("\nrequest VIN from Broadcast");
         // start collecting packets
         let packets = connection.iter_for(Duration::from_secs(5));
@@ -421,14 +402,15 @@ fn vin(connection: &mut dyn Connection, source_address: u8) -> Result<()> {
                     String::from_utf8(p.data().into()).unwrap()
                 )
             });
-    })
+    }
+    Ok(())
 }
 
 fn log(connection: &dyn Connection) -> Result<()> {
     eprintln!("\n\nlog everything for the next 30 days");
     connection
         .iter()
-        .filter_map(|p| p) //_for(Duration::from_secs(60 * 60 * 24 * 30))
+        .flatten() //_for(Duration::from_secs(60 * 60 * 24 * 30))
         .for_each(|p| println!("{p}"));
     Ok(())
 }

@@ -8,16 +8,11 @@ use std::time::Duration;
 /// PushBusIter is an experiment to use array based queues per thread, instead of a shared Linked List.
 /// Most CPU time is used reading the RP1210 adapter, so the Bus isn't a significant contributer to CPU usage.
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct PushBus<T> {
     iters: Arc<Mutex<Vec<PushBusIter<T>>>>,
 }
 impl<T> PushBus<T> {
-    pub fn new() -> Self {
-        Self {
-            iters: Arc::new(Mutex::new(Vec::new())),
-        }
-    }
     pub fn close(&mut self) {
         self.iters
             .lock()
@@ -52,7 +47,7 @@ impl<T> Iterator for PushBusIter<T> {
         // this means there was an empty response from poll()
         // sleep to avoid busy spinning
         thread::sleep(SLEEP_DURATION);
-        return Some(None);
+        Some(None)
     }
 }
 
