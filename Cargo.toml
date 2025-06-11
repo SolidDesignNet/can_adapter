@@ -21,7 +21,7 @@ path = "src/main.rs"
 anyhow = "1.0.98"
 libloading = "0.8.8"
 rust-ini = "0.21.1"
-clap = { version = "4.5.39", features = ["derive"] }
+clap = { version = "4.5.40", features = ["derive"] }
 clap-num = "1.2.0"
 color-print = { version = "0.3.7" }
 dbg_hex={version="0.2.0"}

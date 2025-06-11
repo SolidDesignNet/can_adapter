@@ -1,17 +1,22 @@
 use std::time::{Duration, Instant, SystemTime};
 
 use anyhow::Result;
-use clap::{Args, Parser, Subcommand};
+use clap::{Parser, Subcommand};
 use clap_num::maybe_hex;
 use connection::Connection;
 use packet::J1939Packet;
 use slcan::Slcan;
 
 pub mod connection;
+pub mod j1939;
 pub mod packet;
 pub mod pushbus;
 pub mod sim;
 pub mod slcan;
+pub mod uds;
+
+use j1939::J1939;
+use uds::Uds;
 
 #[cfg(windows)]
 pub mod rp1210;
@@ -24,54 +29,12 @@ pub mod socketcanconnection;
 use socketcanconnection::SocketCanConnection;
 
 #[derive(Debug, Parser)] // requires `derive` feature
-#[command(name = "git")]
-#[command(about = "A fictional versioning CLI", long_about = None)]
+#[command(name = "cancan")]
+#[command(about = "CAN tool", long_about = None)]
 struct Cli {
-    #[command(subcommand)]
-    command: CanCommand,
-}
-
-#[derive(Subcommand, Debug, Clone)]
-enum CanCommand {
-    /// Dump Vector ASC compatible log to stdout.
-    Log {
-        connection: ConnectionFactory,
-    },
-    /// Used for testing.  Requires another instance to send or ping this source address.
-    Server { connection: ConnectionFactory },
-    /// Latency test. Ping [da] with as many requests as it will respond to.
-    Ping {
-        connection: ConnectionFactory,
-
-        #[arg(long="da", short('d'), default_value = "00",value_parser=hex8)]
-        /// Adapter Address (used for packets send and transport protocol)
-        destination_address: u8,
-    },
-    /// Bandwidth test.  Send as much data to [da] with as many requests as it will respond to.
-    Bandwidth {
-        connection: ConnectionFactory,
-
-        // Destination Address
-        #[arg(long="da", short('d'), default_value = "00",value_parser=hex8)]
-        destination_address: u8,
-    },
-    Send {
-        connection: ConnectionFactory,
-
-        // ID
-        #[arg( value_parser=maybe_hex::<u32>)]
-        id: u32,
-        #[arg( value_parser=maybe_hex::<u64>)]
-        payload: u64,
-    },
-    /// Read the VIN.
-    Vin { connection: ConnectionFactory },
-}
-
-#[derive(Args, Debug, Default, Clone)]
-pub struct ConnectionFactory {
-    #[command(subcommand)]
-    pub connection: Descriptors,
+    #[arg(long, short('c'), default_value = "false")]
+    connction_help: bool,
+    pub connection: String,
 
     #[arg(long="sa", short('a'), default_value = "F9",value_parser=hex8)]
     /// Adapter Address (used for packets send and transport protocol)
@@ -79,19 +42,65 @@ pub struct ConnectionFactory {
 
     #[arg(long, short('v'), default_value = "false")]
     pub verbose: bool,
+
+    #[clap(subcommand)]
+    command: CanCommand,
 }
 
-#[derive(Subcommand, Debug, Default, Clone)]
-pub enum Descriptors {
-    #[default]
+#[derive(Subcommand, Debug, Clone)]
+enum CanCommand {
+    /// Dump Vector ASC compatible log to stdout.
+    Log,
+    /// Used for testing.  Requires another instance to send or ping this source address.
+    Server,
+    /// Latency test. Ping [da] with as many requests as it will respond to.
+    Ping {
+        #[arg(long="da", short('d'), default_value = "00",value_parser=hex8)]
+        /// Adapter Address (used for packets send and transport protocol)
+        destination_address: u8,
+    },
+    /// Bandwidth test.  Send as much data to [da] with as many requests as it will respond to.
+    Bandwidth {
+        // Destination Address
+        #[arg(long="da", short('d'), default_value = "00",value_parser=hex8)]
+        destination_address: u8,
+    },
+    /// Send arbitrary CAN message
+    Send {
+        /// ID 29 bit hex
+        #[arg( value_parser=maybe_hex::<u32>)]
+        id: u32,
+        /// Payload as hex u64
+        #[arg( value_parser=maybe_hex::<u64>)]
+        payload: u64,
+    },
+    /// Read the VIN.
+    Vin,
+    /// Common UDS requests
+    Uds {
+        #[command(subcommand)]
+        uds: Uds,
+    },
+    /// Common J1939 requests
+    J1939 {
+        #[command(subcommand)]
+        j1939: J1939,
+    },
+}
+
+fn hex_array(arg: &str) -> Result<Box<[u8]>, std::num::ParseIntError> {
+    Ok(Box::new([0, 0, 0]))
+}
+
+#[derive(Parser, Debug, Clone)]
+pub enum ConnectionDescriptor {
     /// List avaliable adapters
-    List,
+    List {},
     /// Simulation - TODO
     Sim {},
     /// SAE J2534 - TODO
     J2534 {},
     /// Linux "socketcan" interface. Modules must already be loaded.
-    #[command(name = "socketcan")]
     #[cfg(target_os = "linux")]
     SocketCan {
         /// device: 'can0'
@@ -128,20 +137,20 @@ pub enum Descriptors {
     },
 }
 
-impl ConnectionFactory {
+impl ConnectionDescriptor {
     pub fn connect(&self) -> Result<Box<dyn Connection>> {
-        eprintln!("connecting {:?}", self.connection);
-        match &self.connection {
-            Descriptors::List => list_all(),
-            Descriptors::Sim {} => todo!(),
-            Descriptors::J2534 {} => todo!(),
+        let connection = self;
+        match &connection {
+            ConnectionDescriptor::List {} => list_all(),
+            ConnectionDescriptor::Sim {} => todo!(),
+            ConnectionDescriptor::J2534 {} => todo!(),
             #[cfg(target_os = "linux")]
-            Descriptors::SocketCan { dev, speed } => {
+            ConnectionDescriptor::SocketCan { dev, speed } => {
                 Ok(Box::new(SocketCanConnection::new(dev, *speed)?) as Box<dyn Connection>)
             }
-            Descriptors::SLCAN { port, speed } => Ok(Box::new(Slcan::new(port, *speed)?)),
+            ConnectionDescriptor::SLCAN { port, speed } => Ok(Box::new(Slcan::new(port, *speed)?)),
             #[cfg(windows)]
-            Descriptors::RP1210 {
+            ConnectionDescriptor::RP1210 {
                 id,
                 device,
                 connection_string,
@@ -176,46 +185,42 @@ pub fn list_all() -> ! {
 fn hex8(str: &str) -> Result<u8, std::num::ParseIntError> {
     u8::from_str_radix(str, 16)
 }
+fn hex32(str: &str) -> Result<u32, std::num::ParseIntError> {
+    u32::from_str_radix(str, 16)
+}
 
 pub fn main() -> Result<()> {
+    let cli = Cli::parse();
+    let mut connection =
+        ConnectionDescriptor::parse_from(std::iter::once("").chain(cli.connection.split(" ")))
+            .connect()?;
+    let connection = connection.as_mut();
     // open the adapter
-    match CanCommand::parse() {
-        CanCommand::Server { connection } => {
-            server(connection.connect()?.as_mut(), connection.source_address)?;
+    match cli.command {
+        CanCommand::Server => {
+            server(connection, cli.source_address)?;
         }
         CanCommand::Ping {
-            connection,
             destination_address,
         } => {
-            ping(
-                connection.connect()?.as_mut(),
-                connection.source_address,
-                destination_address,
-            )?;
+            ping(connection, cli.source_address, destination_address)?;
         }
-        CanCommand::Send {
-            connection,
-            id,
-            payload,
-        } => {
-            send(connection.connect()?.as_mut(), id, &payload.to_be_bytes())?;
+        CanCommand::Send { id, payload } => {
+            send(connection, id, &payload.to_be_bytes())?;
         }
         CanCommand::Bandwidth {
-            connection,
             destination_address,
         } => {
-            bandwidth(
-                connection.connect()?.as_mut(),
-                connection.source_address,
-                destination_address,
-            )?;
+            bandwidth(connection, cli.source_address, destination_address)?;
         }
-        CanCommand::Vin { connection } => {
-            vin(connection.connect()?.as_mut(), connection.source_address)?;
+        CanCommand::Vin => {
+            vin(connection, cli.source_address)?;
         }
-        CanCommand::Log { connection } => {
-            log(connection.connect()?.as_mut())?;
+        CanCommand::Log => {
+            log(connection)?;
         }
+        CanCommand::Uds { uds } => uds.execute(connection)?,
+        CanCommand::J1939 { j1939 } => j1939.execute(connection)?,
     }
     Ok(())
 }

@@ -29,7 +29,6 @@ use crate::socketcanconnection;
 ///    Ok(())
 /// }
 /// ```
-
 impl IntoIterator for &mut dyn Connection {
     type Item = Option<J1939Packet>;
 
@@ -52,7 +51,7 @@ impl IntoIterator for &dyn Connection {
 pub trait Connection: Send + Sync {
     /// Send packet on CAN adapter
     fn send(&mut self, packet: &J1939Packet) -> Result<J1939Packet, anyhow::Error>;
-
+        
     /// read packets. Some(None) does not indicate end of iterator. Some(None) indicates that a poll() returned None.
     fn iter(&self) -> Box<dyn Iterator<Item = Option<J1939Packet>> + Send + Sync>;
 
