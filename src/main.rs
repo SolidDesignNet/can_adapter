@@ -34,6 +34,7 @@ use socketcanconnection::SocketCanConnection;
 pub struct CanCan {
     #[arg(long, short('c'), default_value = "false")]
     connction_help: bool,
+
     pub connection: String,
 
     #[arg(long="sa", short('s'), default_value = "0xF9",value_parser=maybe_hex::<u8>)]
@@ -92,6 +93,9 @@ enum CanCommand {
     },
     /// Common J1939 requests
     J1939 {
+        #[arg(long,short = 't')]
+        transport_protocol: bool,
+
         #[command(subcommand)]
         j1939: J1939,
     },
@@ -231,8 +235,8 @@ pub fn main() -> Result<()> {
             // FIXME
             uds.execute(cli).expect("Unable to send UDS");
         }
-        CanCommand::J1939 { j1939 } => {
-            j1939.execute(cli)?;
+        CanCommand::J1939 { j1939, transport_protocol } => {
+            j1939.execute(cli, transport_protocol)?;
         }
     }
     Ok(())
