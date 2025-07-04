@@ -1,7 +1,7 @@
 use std::time::{Duration, Instant, SystemTime};
 
 use anyhow::Result;
-use clap::{Parser, Subcommand};
+use clap::*;
 use clap_num::maybe_hex;
 use connection::Connection;
 use packet::J1939Packet;
@@ -28,23 +28,40 @@ pub mod socketcanconnection;
 #[cfg(target_os = "linux")]
 use socketcanconnection::SocketCanConnection;
 
-#[derive(Debug, Parser)] // requires `derive` feature
+#[derive(Parser)] // requires `derive` feature
 #[command(name = "cancan")]
 #[command(about = "CAN tool", long_about = None)]
-struct Cli {
+pub struct CanCan {
     #[arg(long, short('c'), default_value = "false")]
     connction_help: bool,
     pub connection: String,
 
-    #[arg(long="sa", short('a'), default_value = "F9",value_parser=hex8)]
+    #[arg(long="sa", short('s'), default_value = "0xF9",value_parser=maybe_hex::<u8>)]
     /// Adapter Address (used for packets send and transport protocol)
     pub source_address: u8,
+
+    #[arg(long="da", short('d'), default_value = "0xFF",value_parser=maybe_hex::<u8>)]
+    /// Adapter Address (used for packets send and transport protocol)
+    pub destination_address: u8,
+
+    #[arg(long = "timeout", short('t'), default_value = "2000")]
+    /// Timeout in ms
+    pub timeout: u64,
 
     #[arg(long, short('v'), default_value = "false")]
     pub verbose: bool,
 
     #[clap(subcommand)]
     command: CanCommand,
+}
+impl CanCan {
+    fn timeout(&self) -> Duration {
+        Duration::from_millis(self.timeout)
+    }
+}
+pub struct CanContext {
+    pub can_can: CanCan,
+    pub connection: Box<dyn Connection>,
 }
 
 #[derive(Subcommand, Debug, Clone)]
@@ -54,23 +71,15 @@ enum CanCommand {
     /// Used for testing.  Requires another instance to send or ping this source address.
     Server,
     /// Latency test. Ping [da] with as many requests as it will respond to.
-    Ping {
-        #[arg(long="da", short('d'), default_value = "00",value_parser=hex8)]
-        /// Adapter Address (used for packets send and transport protocol)
-        destination_address: u8,
-    },
+    Ping,
     /// Bandwidth test.  Send as much data to [da] with as many requests as it will respond to.
-    Bandwidth {
-        // Destination Address
-        #[arg(long="da", short('d'), default_value = "00",value_parser=hex8)]
-        destination_address: u8,
-    },
+    Bandwidth,
     /// Send arbitrary CAN message
     Send {
-        /// ID 29 bit hex
+        /// ID 29 bit (dec or 0xhex)
         #[arg( value_parser=maybe_hex::<u32>)]
         id: u32,
-        /// Payload as hex u64
+        /// Payload (dec or 0xhex u64)
         #[arg( value_parser=maybe_hex::<u64>)]
         payload: u64,
     },
@@ -190,55 +199,57 @@ fn hex32(str: &str) -> Result<u32, std::num::ParseIntError> {
 }
 
 pub fn main() -> Result<()> {
-    let cli = Cli::parse();
-    let mut connection =
-        ConnectionDescriptor::parse_from(std::iter::once("").chain(cli.connection.split(" ")))
+    let can_can = CanCan::parse();
+    let connection =
+        ConnectionDescriptor::parse_from(std::iter::once("").chain(can_can.connection.split(" ")))
             .connect()?;
-    let connection = connection.as_mut();
-    // open the adapter
-    match cli.command {
+    let cli = &mut CanContext {
+        can_can,
+        connection,
+    };
+    match cli.can_can.command.clone() {
         CanCommand::Server => {
-            server(connection, cli.source_address)?;
+            server(cli)?;
         }
-        CanCommand::Ping {
-            destination_address,
-        } => {
-            ping(connection, cli.source_address, destination_address)?;
+        CanCommand::Ping => {
+            ping(cli)?;
         }
         CanCommand::Send { id, payload } => {
-            send(connection, id, &payload.to_be_bytes())?;
+            send(cli, id, &payload.to_be_bytes())?;
         }
-        CanCommand::Bandwidth {
-            destination_address,
-        } => {
-            bandwidth(connection, cli.source_address, destination_address)?;
+        CanCommand::Bandwidth => {
+            bandwidth(cli)?;
         }
         CanCommand::Vin => {
-            vin(connection, cli.source_address)?;
+            vin(cli)?;
         }
         CanCommand::Log => {
-            log(connection)?;
+            log(cli)?;
         }
-        CanCommand::Uds { uds } => uds.execute(connection)?,
-        CanCommand::J1939 { j1939 } => j1939.execute(connection)?,
+        CanCommand::Uds { uds } => {
+            // FIXME
+            uds.execute(cli).expect("Unable to send UDS");
+        }
+        CanCommand::J1939 { j1939 } => {
+            j1939.execute(cli)?;
+        }
     }
     Ok(())
 }
 
-fn send(connection: &mut (dyn Connection + 'static), id: u32, payload: &[u8]) -> Result<()> {
+fn send(can_can: &mut CanContext, id: u32, payload: &[u8]) -> Result<()> {
     let packet = J1939Packet::new(None, 1, id, payload);
-    connection.send(&packet)?;
+    can_can.connection.send(&packet)?;
     Ok(())
 }
 
 const PING_PGN: u32 = 0xFF00;
 const SEND_PGN: u32 = 0xFF01;
 
-fn bandwidth(
-    connection: &mut dyn Connection,
-    source_address: u8,
-    destination_address: u8,
-) -> Result<()> {
+fn bandwidth(can_can: &mut CanContext) -> Result<()> {
+    let source_address = can_can.can_can.source_address;
+    let destination_address = can_can.can_can.destination_address;
+    let connection = can_can.connection.as_mut();
     let mut sequence: u64 = 0;
     loop {
         let p = J1939Packet::new_packet(
@@ -255,11 +266,10 @@ fn bandwidth(
     }
 }
 
-fn ping(
-    connection: &mut dyn Connection,
-    source_address: u8,
-    destination_address: u8,
-) -> Result<()> {
+fn ping(cli: &mut CanContext) -> Result<()> {
+    let source_address = cli.can_can.source_address;
+    let destination_address = cli.can_can.destination_address;
+    let connection = cli.connection.as_mut();
     let mut sequence: u64 = 0;
     let mut complete: u64 = 0;
     let mut last_report = Instant::now();
@@ -293,10 +303,12 @@ fn ping(
     }
 }
 
-fn server(connection: &mut dyn Connection, sa: u8) -> Result<()> {
+fn server(cli: &mut CanContext) -> Result<()> {
+    let sa = cli.can_can.source_address;
     let mut count: i64 = 0;
     let mut prev: i64 = 0;
     let mut prev_time: SystemTime = SystemTime::now();
+    let connection = cli.connection.as_mut();
     let stream = connection
         .iter()
         .filter_map(|o| o.filter(|p| p.source() != sa));
@@ -341,7 +353,9 @@ fn server(connection: &mut dyn Connection, sa: u8) -> Result<()> {
     Ok(())
 }
 
-fn vin(connection: &mut dyn Connection, source_address: u8) -> Result<()> {
+fn vin(can_can: &mut CanContext) -> Result<()> {
+    let source_address = can_can.can_can.source_address;
+    let connection = can_can.connection.as_mut();
     {
         eprintln!("request VIN from ECM");
         // start collecting packets
@@ -411,7 +425,8 @@ fn vin(connection: &mut dyn Connection, source_address: u8) -> Result<()> {
     Ok(())
 }
 
-fn log(connection: &dyn Connection) -> Result<()> {
+fn log(can_can: &mut CanContext) -> Result<()> {
+    let connection = can_can.connection.as_mut();
     eprintln!("\n\nlog everything for the next 30 days");
     connection
         .iter()

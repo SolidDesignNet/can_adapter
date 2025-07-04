@@ -31,7 +31,7 @@ use crate::pushbus::PushBus;
 ///
 /// PEAK:
 /// ```
-/// sudo bash -xc 'rmmod peak_usb && modprobe peak_usb && ipslink set can0 name peak && ip link set peak type can bitrate 500000 && ip link set peak up'
+/// sudo bash -xc 'rmmod peak_usb && modprobe peak_usb && ip link set can0 name peak && ip link set peak type can bitrate 500000 && ip link set peak up'
 /// ```
 #[derive(Clone)]
 pub struct SocketCanConnection {
@@ -137,7 +137,7 @@ struct SocketCanConnectionFactory {
     speed: u64,
 }
 impl ConnectionFactory for SocketCanConnectionFactory {
-    fn new(&self) -> anyhow::Result<Box<dyn Connection>> {
+    fn create(&self) -> anyhow::Result<Box<dyn Connection>> {
         Ok(Box::new(SocketCanConnection::new(&self.name, self.speed)?) as Box<dyn Connection>)
     }
 

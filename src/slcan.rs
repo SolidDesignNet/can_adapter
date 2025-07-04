@@ -147,7 +147,7 @@ fn parse_result(now: u32, buf: String) -> Result<J1939Packet> {
     // {T}{4 * 2 digit hex bytes}{1 digit length}{2 digit hex payload}
     if len < SIZE || len % 2 != 0 {
         let message = format!("Invalid buf [{buf}] len:{len} {}", len % 2);
-        eprintln!("{}", message);
+        eprintln!("{message}");
         return Err(Error::msg(message));
     }
     let id = u32::from_str_radix(&buf[1..SIZE], 16)?;
@@ -190,7 +190,7 @@ struct SclanFactory {
 }
 
 impl ConnectionFactory for SclanFactory {
-    fn new(&self) -> Result<Box<dyn Connection>> {
+    fn create(&self) -> Result<Box<dyn Connection>> {
         Slcan::new(self.port_info.port_name.as_str(), self.speed)
             .map(|c| Box::new(c) as Box<dyn Connection>)
     }

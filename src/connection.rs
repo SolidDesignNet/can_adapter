@@ -16,7 +16,7 @@ use crate::socketcanconnection;
 /// use std::time::{Duration, Instant};
 /// use can_adapter::connection::Connection;
 /// use can_adapter::packet::J1939Packet;
-/// fn vin(connection: & mut dyn Connection) ->Result<(),anyhow::Error> {
+/// fn vin(connection: & mut dyn Connection) ->Result<()> {
 ///   let packets = connection.iter_for(Duration::from_secs(2));
 ///   connection.send(&J1939Packet::new(1, 0x18EAFFF9, &[0xEC, 0xFE, 0x00]))?;
 ///   packets
@@ -50,7 +50,7 @@ impl IntoIterator for &dyn Connection {
 
 pub trait Connection: Send + Sync {
     /// Send packet on CAN adapter
-    fn send(&mut self, packet: &J1939Packet) -> Result<J1939Packet, anyhow::Error>;
+    fn send(&mut self, packet: &J1939Packet) -> Result<J1939Packet>;
         
     /// read packets. Some(None) does not indicate end of iterator. Some(None) indicates that a poll() returned None.
     fn iter(&self) -> Box<dyn Iterator<Item = Option<J1939Packet>> + Send + Sync>;
@@ -71,7 +71,7 @@ pub trait Connection: Send + Sync {
 }
 
 pub trait ConnectionFactory {
-    fn new(&self) -> Result<Box<dyn Connection>>;
+    fn create(&self) -> Result<Box<dyn Connection>>;
     fn command_line(&self) -> String;
     fn name(&self) -> String;
 }
@@ -86,7 +86,7 @@ pub struct DeviceDescriptor {
     pub connections: Vec<Box<dyn ConnectionFactory>>,
 }
 
-pub fn enumerate_connections() -> Result<Vec<ProtocolDescriptor>, anyhow::Error> {
+pub fn enumerate_connections() -> Result<Vec<ProtocolDescriptor>> {
     Ok([
         #[cfg(target_os = "windows")]
         rp1210::list_all()?,

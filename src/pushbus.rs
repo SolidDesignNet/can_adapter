@@ -26,6 +26,7 @@ impl<T> PushBus<T> {
 pub struct PushBusIter<T> {
     data: Arc<Mutex<VecDeque<Option<T>>>>,
     running: Arc<AtomicBool>,
+    sleep: bool,
 }
 
 const SLEEP_DURATION: Duration = Duration::from_millis(1);
@@ -42,11 +43,15 @@ impl<T> Iterator for PushBusIter<T> {
         }
         let v = self.data.lock().unwrap().pop_front();
         if v.is_some() {
+            self.sleep = false;
             return v;
         }
         // this means there was an empty response from poll()
         // sleep to avoid busy spinning
-        thread::sleep(SLEEP_DURATION);
+        if self.sleep {
+            thread::sleep(SLEEP_DURATION);
+        }
+        self.sleep = true;
         Some(None)
     }
 }
@@ -56,6 +61,7 @@ impl<T: Send + Sync + 'static + Clone> PushBus<T> {
         let x = PushBusIter {
             data: Arc::new(Mutex::new(VecDeque::new())),
             running: Arc::new(AtomicBool::new(true)),
+            sleep: false,
         };
         self.iters.lock().unwrap().push(x.clone());
         Box::new(x)

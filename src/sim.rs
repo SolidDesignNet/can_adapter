@@ -80,7 +80,7 @@ impl Drop for SimulatedConnection {
 }
 struct SimulatedConnectionFactory {}
 impl ConnectionFactory for SimulatedConnectionFactory {
-    fn new(&self) -> Result<Box<dyn Connection>> {
+    fn create(&self) -> Result<Box<dyn Connection>> {
         Ok(Box::new(SimulatedConnection::new()?) as Box<dyn Connection>)
     }
 

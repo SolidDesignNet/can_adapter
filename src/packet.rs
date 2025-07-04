@@ -37,7 +37,7 @@ fn as_hex(data: &[u8]) -> String {
     // FIXME optimize
     let mut s = String::new();
     for byte in data {
-        write!(&mut s, " {:02X}", byte).expect("Unable to write");
+        write!(&mut s, " {byte:02X}").expect("Unable to write");
     }
     s[1..].to_string()
 }
@@ -45,7 +45,7 @@ fn as_hex_nospace(data: &[u8]) -> String {
     // FIXME optimize
     let mut s = String::new();
     for byte in data {
-        write!(&mut s, "{:02X}", byte).expect("Unable to write");
+        write!(&mut s, "{byte:02X}").expect("Unable to write");
     }
     s
 }
