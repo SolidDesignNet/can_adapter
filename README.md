@@ -37,16 +37,15 @@ Options:
   -V, --version                   Print version
 
 ```
-`log` does what you would expect and prints all of the packets to stdout in a format simir to Vector's .ASC files.
-`server`, `ping`, and `bandwidth` are used to performance test adapters.
-`send` sends an arbitrary packet specified in a format similar to Vector's ASC file format.
-`vin` reads the VIN from address 0 and broadcast. It is used as a demonstration.
-`uds` is intended to be a command line implementation of ISO14229. It currently supports ISO15765.
-`j1939` allows J1939 requests. It currently supports receiving J1939-21 transport protocol.  Sending transport protocol has not be validated beyond a self test.
-
-`--sa` and `--da` are to configure RP1210 adapters have have built in support for J1939-21 transport protocol.
+- `log` does what you would expect and prints all of the packets to stdout in a format simir to Vector's .ASC files.
+- `server`, `ping`, and `bandwidth` are used to performance test adapters.
+- `send` sends an arbitrary packet specified in a format similar to Vector's ASC file format.
+- `vin` reads the VIN from address 0 and broadcast. It is used as a demonstration.
+- `uds` is intended to be a command line implementation of ISO14229. It currently supports ISO15765.
+- `j1939` allows J1939 requests. It currently supports receiving J1939-21 transport protocol.  Sending transport protocol has not be validated beyond a self test.
+- `--sa` and `--da` are to configure RP1210 adapters have have built in support for J1939-21 transport protocol.
 # API
-See main.rs implmentation for `fn vin(...)`
+See main.rs implmentation for `fn vin(...)` https://github.com/SolidDesignNet/can_adapter/blob/main/src/main.rs#L357
 
 # Applications
 When combined with DBC or J1939DA parsing, this becomes a light weight CAN logger.  See https://github.com/SolidDesignNet/j1939logger.
