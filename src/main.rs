@@ -98,7 +98,8 @@ enum CanCommand {
 }
 
 fn hex_array(arg: &str) -> Result<Box<[u8]>, std::num::ParseIntError> {
-    Ok(Box::new([0, 0, 0]))
+    todo!()
+    //Ok(Box::new([0, 0, 0]))
 }
 
 #[derive(Parser, Debug, Clone)]

@@ -15,6 +15,7 @@ pub struct Iso15765<'a> {
 }
 
 impl<'a> Iso15765<'a> {
+    // connection should be a Box
     pub fn new(
         connection: &'a mut dyn Connection,
         pgn: u32,
@@ -38,7 +39,11 @@ impl<'a> Iso15765<'a> {
         if req.len() > 8 {
             self.transport_send(req)?;
         } else {
-            let payload = [&[req.len() as u8][..], &req[..]].concat();
+            let mut payload = [&[req.len() as u8][..], &req[..]].concat();
+            // pad out to 8 bytes
+            while payload.len() < 8 {
+                payload.push(0xFF);
+            }
             let p = J1939Packet::new(None, 1, self.send_header | 0x18000000, &payload);
             self.connection.send(&p)?;
         }
@@ -69,13 +74,17 @@ impl<'a> Iso15765<'a> {
             J1939Packet::new_packet(None, 1, 0x6, self.pgn, self.da, self.sa, payload.as_slice());
         let mut flow_control_stream = self.connection.iter_for(Duration::from_secs(2));
         self.connection.send(&first_frame)?;
-        
+
         // response to flow control
         let flow_control = flow_control_stream.find(|p| p.id() & 0xFFFFFF == self.receive_header);
         match flow_control {
             Some(p) => {
                 if p.data()[0] == 0x7F {
                     Err(anyhow!("NACK: {req:?} -> {p}"))
+                } else if p.data()[0] != 0x30 {
+                    Err(anyhow!(
+                        "Unexpected: {req:?} -> {p} should this be ignored?"
+                    ))
                 } else {
                     // validate response?
 
@@ -97,13 +106,17 @@ impl<'a> Iso15765<'a> {
                     // packet size of 21 means 3 consecutive packets
 
                     // First consecutive packet sequence is 1 and max is 0 (really. Look it up.)
-                    for sequence in 1..size / 7 {
+                    let frames = 1 + size / 7;
+                    for sequence in 1..frames {
                         thread::sleep(interpacket_delay);
-                        let payload = [
-                            &[0x20 | (sequence as u8 & 0xF)],
-                            &req[(6 + (sequence - 1) * 7)..(7 + 6 + (sequence - 1) * 7)],
-                        ]
-                        .concat();
+                        let offset = 6 + (sequence - 1) * 7;
+                        let end = 7 + offset;
+                        let end = if req.len() < end { req.len() } else { end };
+                        let mut payload =
+                            [&[0x20 | (sequence as u8 & 0xF)], &req[offset..end]].concat();
+                        while payload.len() < 8 {
+                            payload.push(0xFF);
+                        }
                         let consecutive = J1939Packet::new_packet(
                             None,
                             1,
@@ -119,7 +132,7 @@ impl<'a> Iso15765<'a> {
                     Ok(())
                 }
             }
-            None => Err(anyhow!("No response to: {req:?}",)),
+            None => Err(anyhow!("No response to: {req:X?}",)),
         }
     }
 
@@ -136,12 +149,59 @@ impl<'a> Iso15765<'a> {
         result.extend(p.data()[2..].iter());
 
         let len = (0xf & p.data()[0] as u32) << 8 | (p.data()[1] as u32);
-        let frames = (len - 6) / 7;
+        let frames = 1 + (len - 6) / 7;
         stream
             .filter(|p| p.id() & 0xFFFFFF == self.receive_header)
             // exit as soon as we have all the frames
             .take(frames as usize)
-            .for_each(|p| result.extend(p.data()));
+            .for_each(|p| result.extend(p.data()[1..].iter()));
+        // trim padding
+        result.truncate(len as usize);
         Ok(Some(result))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use anyhow::Ok;
+
+    use crate::sim::SimulatedConnection;
+
+    use super::*;
+    #[test]
+    fn send8() -> Result<()> {
+        let mut connection = SimulatedConnection::new()?;
+        let mut stream = connection.iter_for(Duration::from_secs(2));
+        let mut tp = Iso15765::new(&mut connection, 0xDA00, Duration::from_secs(2), 0xF9, 0);
+        tp.send(&[1, 2, 3].to_vec())?;
+        let packet = stream.find(|p| p.id() == 0x18DA00F9).unwrap();
+        eprintln!("packet {packet:X?}",);
+        assert_eq!(0x18DA00F9, packet.id());
+        assert_eq!(
+            [0x03, 0x01, 0x02, 0x03, 0xFF, 0xFF, 0xFF, 0xFF],
+            packet.data()
+        );
+        Ok(())
+    }
+    #[test]
+    fn send14() -> Result<()> {
+        const DURATION: Duration = Duration::from_secs(2_000);
+        let mut rx_connection = Box::new(SimulatedConnection::new()?);
+        let mut tx_connection = rx_connection.clone();
+
+        let mut stream = rx_connection.iter_for(DURATION);
+
+        thread::spawn(move || {
+            let mut tx_tp = Iso15765::new(tx_connection.as_mut(), 0xDA00, DURATION, 0xF9, 0);
+            tx_tp.send(&[0x55; 14].to_vec()).expect("Failed to send");
+            // FIXME: this is required, because when connection goes out of scope it closes the bus, that is shared between the connections.
+            //thread::sleep(Duration::from_secs(1));
+        });
+
+        let rx_tp = Iso15765::new(rx_connection.as_mut(), 0xDA00, DURATION, 0, 0xF9);
+        let packet = rx_tp.receive(stream.by_ref())?;
+
+        assert_eq!([0x55; 14].to_vec(), packet.unwrap());
+        Ok(())
     }
 }

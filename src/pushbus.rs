@@ -82,14 +82,42 @@ impl<T: Send + Sync + 'static + Clone> PushBus<T> {
     }
 }
 
-impl<T> Drop for PushBus<T> {
-    fn drop(&mut self) {
-        self.close();
-    }
-}
+// This breaks the usefullness of clone()
+// impl<T> Drop for PushBus<T> {
+//     fn drop(&mut self) {
+//         self.close();
+//     }
+// }
 impl<T> Drop for PushBusIter<T> {
     fn drop(&mut self) {
         self.running
             .store(false, std::sync::atomic::Ordering::Relaxed);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+
+    use crate::pushbus::PushBus;
+    #[test]
+    fn test_clone() {
+        let mut pb1 = PushBus::default();
+        let pb2 = pb1.clone();
+
+        let mut i1 = pb1.iter();
+        let mut i2 = pb2.iter();
+        pb1.push(Some(1));
+        pb1.push(Some(2));
+        assert_eq!(Some(1), i1.next().unwrap());
+        assert_eq!(Some(1), i2.next().unwrap());
+        assert_eq!(Some(2), i1.next().unwrap());
+        assert_eq!(Some(2), i2.next().unwrap());
+        assert_eq!(None, i1.next().unwrap());
+        assert_eq!(None, i2.next().unwrap());
+
+        let mut i1 = pb1.iter();
+        let mut i2 = pb2.iter();
+        assert_eq!(None, i1.next().unwrap());
+        assert_eq!(None, i2.next().unwrap());
     }
 }

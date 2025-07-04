@@ -1,6 +1,4 @@
 use crate::{
-    connection::{self, Connection},
-    packet::J1939Packet,
     uds::iso15765::Iso15765,
     CanContext,
 };
@@ -19,17 +17,33 @@ pub enum Uds {
         session: u8,
     },
     #[command(name = "readDataByIdentifier")]
-    S22 { did: u16 },
+    S22 {
+        #[arg(value_parser=maybe_hex::<u16>)]
+        did: u16,
+    },
     #[command(name = "writeDataByIdentifier")]
     S2E {
+        #[arg(value_parser=maybe_hex::<u16>)]
         did: u16,
         #[clap(value_parser=crate::hex_array)]
         value: Box<[u8]>,
     },
     #[command(name = "ioController")]
-    S2F { did: u16 },
-    #[command(name = "Auth")]
-    S27 {},
+    S2F {
+        #[arg(value_parser=maybe_hex::<u16>)]
+        did: u16,
+        #[clap(value_parser=crate::hex_array)]
+        value: Box<[u8]>,
+    },
+    #[command(name = "auth")]
+    S27 {
+        #[arg(value_parser=maybe_hex::<u8>)]
+        seed_id: u8,
+        #[arg(value_parser=maybe_hex::<u8>)]
+        key_id: u8,
+        #[clap(value_parser=crate::hex_array)]
+        key: Box<[u8]>,
+    },
 }
 impl Uds {
     pub fn execute(&self, can_can: &mut CanContext) -> Result<Option<UdsBuffer>> {
@@ -37,10 +51,16 @@ impl Uds {
             Uds::S10 { session } => Iso14229Command::build(0x10)
                 .u8(&[*session])
                 .execute_report(can_can),
-            Uds::S22 { did } => todo!(),
+            Uds::S22 { did } => Iso14229Command::build(0x22)
+                .u16(&[*did])
+                .execute_report(can_can),
             Uds::S2E { did, value } => todo!(),
-            Uds::S2F { did } => todo!(),
-            Uds::S27 {} => todo!(),
+            Uds::S2F { did, value } => todo!(),
+            Uds::S27 {
+                seed_id,
+                key_id,
+                key,
+            } => todo!(),
         }
     }
 }

@@ -8,6 +8,7 @@ use crate::connection::{Connection, ConnectionFactory, DeviceDescriptor, Protoco
 use crate::packet::*;
 use crate::pushbus::PushBus;
 
+#[derive(Clone)]
 pub struct SimulatedConnection {
     bus: Box<PushBus<J1939Packet>>,
     running: Arc<AtomicBool>,
@@ -20,7 +21,7 @@ impl SimulatedConnection {
             let running = running.clone();
             let bus = bus.clone();
             Builder::new()
-                .name("rp1210".into())
+                .name("simulated connection".into())
                 .spawn(move || run(running, bus))?;
         }
         Ok(SimulatedConnection {
@@ -74,8 +75,6 @@ fn now() -> u32 {
 impl Drop for SimulatedConnection {
     fn drop(&mut self) {
         self.running.store(false, Ordering::Relaxed);
-        self.bus.close();
-        //let _ = self.thread.take().unwrap().join();
     }
 }
 struct SimulatedConnectionFactory {}
