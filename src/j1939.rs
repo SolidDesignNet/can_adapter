@@ -1,8 +1,4 @@
-use std::{
-    collections::HashMap,
-    io::{self, Write},
-    time::Duration,
-};
+use std::{collections::HashMap, time::Duration};
 
 use anyhow::Result;
 use clap_num::maybe_hex;
@@ -32,7 +28,14 @@ impl J1939 {
         let connection = can_can.connection.as_mut();
         match self {
             J1939::Request { sa, da, pgn } => {
-                let packet = request(connection, transport_protocol, *sa, *da, *pgn)?;
+                let packet = request(
+                    connection,
+                    can_can.can_can.timeout(),
+                    transport_protocol,
+                    *sa,
+                    *da,
+                    *pgn,
+                )?;
                 let s = packet.map_or("No Response".to_string(), |p| format!("{p}"));
                 println!("{s}");
                 Ok(())
@@ -44,12 +47,13 @@ impl J1939 {
 
 fn request(
     connection: &mut (dyn Connection),
+    duration: Duration,
     transport_protocol: bool,
     sa: u8,
     da: u8,
     pgn: u32,
 ) -> Result<Option<J1939Packet>, anyhow::Error> {
-    let iter = connection.iter_for(Duration::from_secs_f32(2.0));
+    let iter = connection.iter_for(duration);
     let packet = J1939Packet::new(
         None,
         0,
@@ -62,7 +66,7 @@ fn request(
     if pgn < 0xF000 {
         response_id |= (sa as u32) << 8;
     }
-    let predicate = |p:&J1939Packet| p.id() & 0xFFFFFF == response_id;
+    let predicate = |p: &J1939Packet| p.id() & 0xFFFFFF == response_id;
 
     let packet = if transport_protocol {
         receive_tp(connection, sa, false, iter).find(predicate)
@@ -94,12 +98,13 @@ pub fn receive_tp(
     let mut bam: HashMap<u8, TPDescriptor> = HashMap::new();
     let mut ds: HashMap<u8, TPDescriptor> = HashMap::new();
 
-    let x = iter.flat_map(move |p| {
+    iter.flat_map(move |p| {
         let r = if p.id() & 0xFFFF00 == bam_control_p {
-            control(connection, &mut bam, true, &p);
+            control(connection, &mut bam, true, &p).expect("Unable to handle controll message {p}");
             None
         } else if p.id() & 0xFFFF00 == ds_control_p {
-            control(connection, &mut ds, passive, &p);
+            control(connection, &mut ds, passive, &p)
+                .expect("Unable to handle controll message {p}");
             None
         } else if p.id() & 0xFFFF00 == bam_data_p {
             data(&mut bam, &p)
@@ -113,8 +118,7 @@ pub fn receive_tp(
         } else {
             vec![p].into_iter()
         }
-    });
-    x
+    })
 }
 
 fn control(

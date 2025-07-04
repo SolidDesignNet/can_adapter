@@ -30,11 +30,9 @@ use socketcanconnection::SocketCanConnection;
 
 #[derive(Parser)] // requires `derive` feature
 #[command(name = "cancan")]
-#[command(about = "CAN tool", long_about = None)]
+#[command(version,about = "CAN tool", long_about = None)]
 pub struct CanCan {
-    #[arg(long, short('c'), default_value = "false")]
-    connction_help: bool,
-
+    /// For a list of possible connections, "cancan list log".  Available connection strings will vary depending on the machine.
     pub connection: String,
 
     #[arg(long="sa", short('s'), default_value = "0xF9",value_parser=maybe_hex::<u8>)]
@@ -86,14 +84,15 @@ enum CanCommand {
     },
     /// Read the VIN.
     Vin,
-    /// Common UDS requests
+    /// Common UDS requests. See "uds --help" for more.
     Uds {
         #[command(subcommand)]
         uds: Uds,
     },
-    /// Common J1939 requests
+    /// Common J1939 requests. See "j1939 --help" for more.
     J1939 {
-        #[arg(long,short = 't')]
+        /// Use application J1939-21 tranport protocol. Defaults to using the adapter, but only RP1210 supports adapter J1939-21 TP.
+        #[arg(long, short = 't')]
         transport_protocol: bool,
 
         #[command(subcommand)]
@@ -188,26 +187,20 @@ pub fn list_all() -> ! {
         for dd in pd.devices {
             eprintln!("  {}", dd.name);
             for c in dd.connections {
-                eprintln!("    {}", c.name());
-                eprintln!("      can_adapter {}", c.command_line());
+                eprintln!("    {}: {}", c.name(), c.command_line());
             }
         }
     }
     std::process::exit(0);
 }
 
-fn hex8(str: &str) -> Result<u8, std::num::ParseIntError> {
-    u8::from_str_radix(str, 16)
-}
-fn hex32(str: &str) -> Result<u32, std::num::ParseIntError> {
-    u32::from_str_radix(str, 16)
-}
-
 pub fn main() -> Result<()> {
     let can_can = CanCan::parse();
+
     let connection =
         ConnectionDescriptor::parse_from(std::iter::once("").chain(can_can.connection.split(" ")))
             .connect()?;
+
     let cli = &mut CanContext {
         can_can,
         connection,
@@ -235,7 +228,10 @@ pub fn main() -> Result<()> {
             // FIXME
             uds.execute(cli).expect("Unable to send UDS");
         }
-        CanCommand::J1939 { j1939, transport_protocol } => {
+        CanCommand::J1939 {
+            j1939,
+            transport_protocol,
+        } => {
             j1939.execute(cli, transport_protocol)?;
         }
     }

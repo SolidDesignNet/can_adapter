@@ -1,7 +1,4 @@
-use crate::{
-    uds::iso15765::Iso15765,
-    CanContext,
-};
+use crate::{uds::iso15765::Iso15765, CanContext};
 use anyhow::Result;
 use clap::*;
 use clap_num::maybe_hex;
@@ -48,10 +45,10 @@ pub enum Uds {
 impl Uds {
     pub fn execute(&self, can_can: &mut CanContext) -> Result<Option<UdsBuffer>> {
         match self {
-            Uds::S10 { session } => Iso14229Command::build(0x10)
+            Uds::S10 { session } => Iso14229Command::build(can_can.can_can.timeout(), 0x10)
                 .u8(&[*session])
                 .execute_report(can_can),
-            Uds::S22 { did } => Iso14229Command::build(0x22)
+            Uds::S22 { did } => Iso14229Command::build(can_can.can_can.timeout(), 0x22)
                 .u16(&[*did])
                 .execute_report(can_can),
             Uds::S2E { did, value } => todo!(),
@@ -82,8 +79,12 @@ impl Default for Iso14229Command {
     }
 }
 impl Iso14229Command {
-    pub fn build(command: u8) -> Iso14229Command {
-        let mut new = Iso14229Command::default();
+    pub fn build(duration: Duration, command: u8) -> Iso14229Command {
+        let mut new = Iso14229Command {
+            raw: Default::default(),
+            pgn: 0xDA00,
+            duration,
+        };
         new.u8(&[command]);
         new
     }
