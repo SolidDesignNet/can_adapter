@@ -110,8 +110,7 @@ impl<'a> Iso15765<'a> {
                     for sequence in 1..frames {
                         thread::sleep(interpacket_delay);
                         let offset = 6 + (sequence - 1) * 7;
-                        let end = 7 + offset;
-                        let end = if req.len() < end { req.len() } else { end };
+                        let end = Ord::min(7 + offset, req.len());
                         let mut payload =
                             [&[0x20 | (sequence as u8 & 0xF)], &req[offset..end]].concat();
                         while payload.len() < 8 {
