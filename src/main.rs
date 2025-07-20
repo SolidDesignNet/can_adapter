@@ -1,4 +1,7 @@
-use std::time::{Duration, Instant, SystemTime};
+use std::{
+    thread,
+    time::{Duration, Instant, SystemTime},
+};
 
 use anyhow::Result;
 use clap::*;
@@ -42,6 +45,10 @@ pub struct CanCan {
     #[arg(long="da", short('d'), default_value = "0xFF",value_parser=maybe_hex::<u8>)]
     /// Adapter Address (used for packets send and transport protocol)
     pub destination_address: u8,
+
+    #[arg(long)]
+    /// J1939-21 use application level transport protocol
+    pub j1939_tp: bool,
 
     #[arg(long = "timeout", short('t'), default_value = "2000")]
     /// Timeout in ms
@@ -360,17 +367,10 @@ fn vin(can_can: &mut CanContext) -> Result<()> {
     {
         eprintln!("request VIN from ECM");
         // start collecting packets
-        let packets = connection.iter_for(Duration::from_secs(5));
+        let mut iter = connection.iter_for(Duration::from_secs(5));
+        let packets = J1939::receive_tp(connection, 0xF9, false, &mut iter);
         // send request for VIN
-        connection.send(&J1939Packet::new_packet(
-            None,
-            1,
-            6,
-            0xEA00,
-            0,
-            source_address,
-            &[0xEC, 0xFE, 0x00],
-        ))?;
+        J1939::request(connection, Duration::from_secs(3), true, 0xF9, 0x00, 0xFEEC)?;
 
         // filter for ECM result
         if let Some(p) = packets
@@ -388,32 +388,21 @@ fn vin(can_can: &mut CanContext) -> Result<()> {
                 p.source(),
                 String::from_utf8(p.data().into()).unwrap(),
                 p
-            )
-        }
+            );
+        };
     }
     {
         eprintln!("\nrequest VIN from Broadcast");
+
         // start collecting packets
-        let packets = connection.iter_for(Duration::from_secs(5));
+        let mut packets = connection.iter_for(Duration::from_secs(5));
+        let packets = J1939::receive_tp(connection, 0xF9, false, &mut packets);
 
         // send request for VIN
-        connection.send(&J1939Packet::new_packet(
-            None,
-            1,
-            6,
-            0xEAFF,
-            0xFF,
-            source_address,
-            &[0xEC, 0xFE, 0x00],
-        ))?;
+        J1939::request(connection, Duration::from_secs(3), true, 0xF9, 0xFF, 0xFEEC)?;
+
         // filter for all results
         packets
-            .filter(|p| p.pgn() == 0xFEEC || p.pgn() == 0xEAFF || p.pgn() & 0xFF00 == 0xE800)
-            .map(|p| {
-                eprintln!("   {p}");
-                p
-            })
-            // log the VINs
             .filter(|p| p.pgn() == 0xFEEC)
             .for_each(|p| {
                 println!(
@@ -428,10 +417,14 @@ fn vin(can_can: &mut CanContext) -> Result<()> {
 
 fn log(can_can: &mut CanContext) -> Result<()> {
     let connection = can_can.connection.as_mut();
-    eprintln!("\n\nlog everything for the next 30 days");
-    connection
-        .iter()
-        .flatten() //_for(Duration::from_secs(60 * 60 * 24 * 30))
-        .for_each(|p| println!("{p}"));
+    let mut iter = connection.iter().flatten(); //_for(Duration::from_secs(60 * 60 * 24 * 30))
+    let j1939_tp = can_can.can_can.j1939_tp;
+    eprintln!("\n\nlog everything for the next 30 days tp:{j1939_tp}");
+    if j1939_tp {
+        J1939::receive_tp(connection, can_can.can_can.source_address, false, &mut iter)
+            .for_each(|p| println!("{p}"));
+    } else {
+        iter.for_each(|p| println!("{p}"));
+    }
     Ok(())
 }

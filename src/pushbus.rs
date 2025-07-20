@@ -8,9 +8,18 @@ use std::time::Duration;
 /// PushBusIter is an experiment to use array based queues per thread, instead of a shared Linked List.
 /// Most CPU time is used reading the RP1210 adapter, so the Bus isn't a significant contributer to CPU usage.
 
-#[derive(Clone, Default)]
 pub struct PushBus<T> {
     iters: Arc<Mutex<Vec<PushBusIter<T>>>>,
+    name: String,
+}
+
+impl<T: Clone> Clone for PushBus<T> {
+    fn clone(&self) -> Self {
+        Self {
+            iters: self.iters.clone(),
+            name: self.name.clone(),
+        }
+    }
 }
 impl<T> PushBus<T> {
     pub fn close(&mut self) {
@@ -28,7 +37,14 @@ pub struct PushBusIter<T> {
     running: Arc<AtomicBool>,
     sleep: bool,
 }
-
+impl<T> PushBus<T> {
+    pub fn new(name: &str) -> Self {
+        Self {
+            iters: Default::default(),
+            name: name.to_string(),
+        }
+    }
+}
 const SLEEP_DURATION: Duration = Duration::from_millis(1);
 impl<T> Iterator for PushBusIter<T> {
     /// That's right, `Option<Option<Packet>>`
@@ -67,15 +83,16 @@ impl<T: Send + Sync + 'static + Clone> PushBus<T> {
         Box::new(x)
     }
 
-    pub fn push(&mut self, item: Option<T>) {
+    pub fn push(&self, item: Option<T>) {
         let mut iters = self.iters.lock().unwrap();
         // remove closed iterators.
         iters.retain(|i| i.running.load(std::sync::atomic::Ordering::Relaxed));
         iters.iter_mut().for_each(|i| {
             let mut items = i.data.lock().unwrap();
+            let name = self.name.as_str();
             let len = items.len();
-            if len > 1000 {
-                eprintln!("pushbus too deep: {len}");
+            if len > 10_000 {
+                eprintln!("{name} pushbus too deep: {len}");
             }
             items.push_back(item.clone())
         });
@@ -101,7 +118,7 @@ mod tests {
     use crate::pushbus::PushBus;
     #[test]
     fn test_clone() {
-        let mut pb1 = PushBus::default();
+        let mut pb1 = PushBus::new("test");
         let pb2 = pb1.clone();
 
         let mut i1 = pb1.iter();

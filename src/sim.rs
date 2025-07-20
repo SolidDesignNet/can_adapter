@@ -1,4 +1,5 @@
 use anyhow::*;
+use std::cell::RefCell;
 use std::sync::atomic::*;
 use std::sync::*;
 use std::thread::Builder;
@@ -15,7 +16,7 @@ pub struct SimulatedConnection {
 }
 impl SimulatedConnection {
     pub fn new() -> Result<SimulatedConnection> {
-        let bus = PushBus::default();
+        let bus = PushBus::new("sim connextion");
         let running = Arc::new(AtomicBool::new(false));
         {
             let running = running.clone();
@@ -44,7 +45,7 @@ fn run(running: Arc<AtomicBool>, mut bus: PushBus<J1939Packet>) {
 
 impl Connection for SimulatedConnection {
     /// Send packet and return packet echoed back from adapter
-    fn send(&mut self, packet: &J1939Packet) -> Result<J1939Packet> {
+    fn send(&self, packet: &J1939Packet) -> Result<J1939Packet> {
         let packet = J1939Packet::new_packet(
             Some(now()),
             packet.channel(),

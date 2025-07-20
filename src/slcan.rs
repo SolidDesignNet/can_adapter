@@ -39,7 +39,7 @@ impl Slcan {
         port.clear(serialport::ClearBuffer::All)?;
 
         let slcan = Slcan {
-            bus: PushBus::default(),
+            bus: PushBus::new("slcan"),
             outbound: Arc::new(Mutex::new(VecDeque::new())),
             running: Arc::new(AtomicBool::new(true)),
             start: SystemTime::now(),
@@ -165,7 +165,7 @@ fn unparse(p: &J1939Packet) -> String {
 
 impl Connection for Slcan {
     fn send(
-        &mut self,
+        &self,
         packet: &crate::packet::J1939Packet,
     ) -> anyhow::Result<crate::packet::J1939Packet> {
         // send packet

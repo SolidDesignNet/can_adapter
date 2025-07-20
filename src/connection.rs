@@ -16,9 +16,9 @@ use crate::socketcanconnection;
 /// use std::time::{Duration, Instant};
 /// use can_adapter::connection::Connection;
 /// use can_adapter::packet::J1939Packet;
-/// fn vin(connection: & mut dyn Connection) ->Result<()> {
+/// fn vin(connection: & mut dyn Connection) {
 ///   let packets = connection.iter_for(Duration::from_secs(2));
-///   connection.send(&J1939Packet::new(1, 0x18EAFFF9, &[0xEC, 0xFE, 0x00]))?;
+///   connection.send(&J1939Packet::new(None, 1, 0x18EAFFF9, &[0xEC, 0xFE, 0x00]));
 ///   packets
 ///     .filter(|p| p.pgn() == 0xFEEC )
 ///     .for_each(|p| println!("VIN: {} packet: {}",String::from_utf8(p.data().to_owned()).unwrap(),p));
@@ -26,7 +26,6 @@ use crate::socketcanconnection;
 ///    connection
 ///      .iter_for(Duration::from_secs(60 * 60 * 24 * 30))
 ///      .for_each(|p| println!("{}", p));
-///    Ok(())
 /// }
 /// ```
 impl IntoIterator for &mut dyn Connection {
@@ -50,8 +49,8 @@ impl IntoIterator for &dyn Connection {
 
 pub trait Connection: Send + Sync {
     /// Send packet on CAN adapter
-    fn send(&mut self, packet: &J1939Packet) -> Result<J1939Packet>;
-        
+    fn send(&self, packet: &J1939Packet) -> Result<J1939Packet>;
+
     /// read packets. Some(None) does not indicate end of iterator. Some(None) indicates that a poll() returned None.
     fn iter(&self) -> Box<dyn Iterator<Item = Option<J1939Packet>> + Send + Sync>;
 

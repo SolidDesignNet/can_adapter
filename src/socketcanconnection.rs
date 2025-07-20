@@ -30,7 +30,7 @@ use crate::pushbus::PushBus;
 /// ```
 ///
 /// PEAK:
-/// ```
+/// ```bash
 /// sudo bash -xc 'rmmod peak_usb && modprobe peak_usb && ip link set can0 name peak && ip link set peak type can bitrate 500000 && ip link set peak up'
 /// ```
 #[derive(Clone)]
@@ -46,7 +46,7 @@ impl SocketCanConnection {
     pub fn new(str: &str, speed: u64) -> Result<SocketCanConnection, anyhow::Error> {
         let socket_can_connection = SocketCanConnection {
             socket: Arc::new(Mutex::new(CanSocket::open(str)?)),
-            bus: PushBus::default(),
+            bus: PushBus::new("Socket CAN"),
             running: Arc::new(AtomicBool::new(false)),
             start: SystemTime::now(),
         };
@@ -96,7 +96,7 @@ impl SocketCanConnection {
 }
 
 impl Connection for SocketCanConnection {
-    fn send(&mut self, packet: &J1939Packet) -> Result<J1939Packet, anyhow::Error> {
+    fn send(& self, packet: &J1939Packet) -> Result<J1939Packet, anyhow::Error> {
         // listen for echo
         let mut i = self.iter_for(Duration::from_millis(1000));
 

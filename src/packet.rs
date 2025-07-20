@@ -163,19 +163,19 @@ mod tests {
     #[test]
     fn test_j1939packet_display() {
         assert_eq!(
-            "      0.0000 1 18FFAAFA [3] 01 02 03 (TX)",
+            "           0 1 18FFAAFA [3] 01 02 03 (TX)",
             J1939Packet::new(None, 1, 0x18FFAAFA, &[1, 2, 3]).to_string()
         );
         assert_eq!(
-            "      0.0000 1 18FFAAFA [3] 01 02 03 (TX)",
+            "         555 1 18FFAAFA [3] 01 02 03",
             J1939Packet::new(Some(555), 1, 0x18FFAAFA, &[1, 2, 3]).to_string()
         );
         assert_eq!(
-            "      0.0000 2 18FFAAF9 [8] 01 02 03 04 05 06 07 08 (TX)",
+            "           0 2 18FFAAF9 [8] 01 02 03 04 05 06 07 08 (TX)",
             J1939Packet::new(None, 2, 0x18FFAAF9, &[1, 2, 3, 4, 5, 6, 7, 8]).to_string()
         );
         assert_eq!(
-            "      0.0000 3 18FFAAFB [8] FF 00 FF 00 FF 00 FF 00 (TX)",
+            "           0 3 18FFAAFB [8] FF 00 FF 00 FF 00 FF 00 (TX)",
             J1939Packet::new(
                 None,
                 3,
