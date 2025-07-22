@@ -7,11 +7,11 @@ use anyhow::Result;
 use clap::*;
 use clap_num::maybe_hex;
 use connection::Connection;
-use packet::J1939Packet;
 use slcan::Slcan;
 
 pub mod connection;
 pub mod j1939;
+pub mod j1939_packet;
 pub mod packet;
 pub mod pushbus;
 pub mod sim;
@@ -30,6 +30,8 @@ use rp1210::Rp1210;
 pub mod socketcanconnection;
 #[cfg(target_os = "linux")]
 use socketcanconnection::SocketCanConnection;
+
+use crate::j1939_packet::J1939Packet;
 
 #[derive(Parser)] // requires `derive` feature
 #[command(name = "cancan")]
@@ -247,7 +249,7 @@ pub fn main() -> Result<()> {
 
 fn send(can_can: &mut CanContext, id: u32, payload: &[u8]) -> Result<()> {
     let packet = J1939Packet::new(None, 1, id, payload);
-    can_can.connection.send(&packet)?;
+    can_can.connection.send(&packet.into())?;
     Ok(())
 }
 
@@ -269,7 +271,7 @@ fn bandwidth(can_can: &mut CanContext) -> Result<()> {
             source_address,
             &sequence.to_be_bytes(),
         );
-        connection.send(&p)?;
+        connection.send(&p.into())?;
         sequence += 1;
     }
 }
@@ -291,10 +293,13 @@ fn ping(cli: &mut CanContext) -> Result<()> {
             destination_address,
             source_address,
             &sequence.to_be_bytes(),
-        );
-        let mut i = connection.iter_for(Duration::from_secs(1));
+        )
+        .into();
+        let mut iter = connection
+            .iter_for(Duration::from_secs(1))
+            .map(|p| p.into());
         connection.send(&p)?;
-        if i.any(|p| p.pgn() == PING_PGN && p.source() == destination_address) {
+        if iter.any(|p: J1939Packet| p.pgn() == PING_PGN && p.source() == destination_address) {
             complete += 1;
         } else {
             eprintln!("FAIL: {p}");
@@ -319,7 +324,8 @@ fn server(cli: &mut CanContext) -> Result<()> {
     let connection = cli.connection.as_mut();
     let stream = connection
         .iter()
-        .filter_map(|o| o.filter(|p| p.source() != sa));
+        .filter_map(|o| o.map(|p| p.into()))
+        .filter(|p: &J1939Packet| p.source() != sa);
 
     for p in stream {
         if p.pgn() == PING_PGN {
@@ -328,7 +334,7 @@ fn server(cli: &mut CanContext) -> Result<()> {
             if count % 10_000 == 0 {
                 eprintln!("pong: {p} -> {pong}");
             }
-            connection.send(pong)?;
+            connection.send(&pong.into())?;
         } else if p.pgn() == SEND_PGN {
             count += 1;
             let this = {
@@ -346,15 +352,18 @@ fn server(cli: &mut CanContext) -> Result<()> {
                 let rate = 1000.0 / now.duration_since(prev_time)?.as_secs_f64();
                 eprintln!("send count: {count} rate: {rate} packet/s");
                 prev_time = now;
-                connection.send(&J1939Packet::new_packet(
-                    None,
-                    1,
-                    6,
-                    SEND_PGN,
-                    p.source(),
-                    sa,
-                    &count.to_be_bytes(),
-                ))?;
+                connection.send(
+                    &J1939Packet::new_packet(
+                        None,
+                        1,
+                        6,
+                        SEND_PGN,
+                        p.source(),
+                        sa,
+                        &count.to_be_bytes(),
+                    )
+                    .into(),
+                )?;
             }
         }
     }
@@ -367,7 +376,9 @@ fn vin(can_can: &mut CanContext) -> Result<()> {
     {
         eprintln!("request VIN from ECM");
         // start collecting packets
-        let mut iter = connection.iter_for(Duration::from_secs(5));
+        let mut iter = connection
+            .iter_for(Duration::from_secs(5))
+            .map(|p| p.into());
         let packets = J1939::receive_tp(connection, 0xF9, false, &mut iter);
         // send request for VIN
         J1939::request(connection, Duration::from_secs(3), true, 0xF9, 0x00, 0xFEEC)?;
@@ -395,29 +406,29 @@ fn vin(can_can: &mut CanContext) -> Result<()> {
         eprintln!("\nrequest VIN from Broadcast");
 
         // start collecting packets
-        let mut packets = connection.iter_for(Duration::from_secs(5));
+        let mut packets = connection
+            .iter_for(Duration::from_secs(5))
+            .map(|p| p.into());
         let packets = J1939::receive_tp(connection, 0xF9, false, &mut packets);
 
         // send request for VIN
         J1939::request(connection, Duration::from_secs(3), true, 0xF9, 0xFF, 0xFEEC)?;
 
         // filter for all results
-        packets
-            .filter(|p| p.pgn() == 0xFEEC)
-            .for_each(|p| {
-                println!(
-                    "SA: {:02X} VIN: {}",
-                    p.source(),
-                    String::from_utf8(p.data().into()).unwrap()
-                )
-            });
+        packets.filter(|p| p.pgn() == 0xFEEC).for_each(|p| {
+            println!(
+                "SA: {:02X} VIN: {}",
+                p.source(),
+                String::from_utf8(p.data().into()).unwrap()
+            )
+        });
     }
     Ok(())
 }
 
 fn log(can_can: &mut CanContext) -> Result<()> {
     let connection = can_can.connection.as_mut();
-    let mut iter = connection.iter().flatten(); //_for(Duration::from_secs(60 * 60 * 24 * 30))
+    let mut iter = connection.iter().flatten().map(|p| p.into());
     let j1939_tp = can_can.can_can.j1939_tp;
     eprintln!("\n\nlog everything for the next 30 days tp:{j1939_tp}");
     if j1939_tp {

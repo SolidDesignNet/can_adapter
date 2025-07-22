@@ -1,17 +1,17 @@
 use anyhow::*;
-use std::cell::RefCell;
 use std::sync::atomic::*;
 use std::sync::*;
 use std::thread::Builder;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::connection::{Connection, ConnectionFactory, DeviceDescriptor, ProtocolDescriptor};
+use crate::j1939_packet::J1939Packet;
 use crate::packet::*;
 use crate::pushbus::PushBus;
 
 #[derive(Clone)]
 pub struct SimulatedConnection {
-    bus: Box<PushBus<J1939Packet>>,
+    bus: Box<PushBus<Packet>>,
     running: Arc<AtomicBool>,
 }
 impl SimulatedConnection {
@@ -32,12 +32,12 @@ impl SimulatedConnection {
     }
 }
 
-fn run(running: Arc<AtomicBool>, mut bus: PushBus<J1939Packet>) {
+fn run(running: Arc<AtomicBool>,  bus: PushBus<Packet>) {
     running.store(true, Ordering::Relaxed);
     let mut seq: u64 = u64::from_be_bytes([0, 0, 0, 0, 0, 0, 0, 0]);
     while running.load(Ordering::Relaxed) {
         let packet = J1939Packet::new_packet(Some(now()), 0, 6, 0xFEF1, 0, 0x0, &seq.to_be_bytes());
-        bus.push(Some(packet));
+        bus.push(Some(packet.into()));
         std::thread::sleep(Duration::from_millis(100));
         seq += 1;
     }
@@ -45,21 +45,23 @@ fn run(running: Arc<AtomicBool>, mut bus: PushBus<J1939Packet>) {
 
 impl Connection for SimulatedConnection {
     /// Send packet and return packet echoed back from adapter
-    fn send(&self, packet: &J1939Packet) -> Result<J1939Packet> {
-        let packet = J1939Packet::new_packet(
+    fn send(&self, packet: &Packet) -> Result<Packet> {
+        let j1939: J1939Packet = packet.into();
+        let packet: Packet = J1939Packet::new_packet(
             Some(now()),
-            packet.channel(),
-            packet.priority(),
-            packet.pgn(),
-            packet.dest(),
-            packet.source(),
-            packet.data(),
-        );
+            j1939.channel(),
+            j1939.priority(),
+            j1939.pgn(),
+            j1939.dest(),
+            j1939.source(),
+            j1939.data(),
+        )
+        .into();
         self.bus.push(Some(packet.clone()));
         Ok(packet)
     }
 
-    fn iter(&self) -> Box<dyn Iterator<Item = Option<J1939Packet>> + Send + Sync> {
+    fn iter(&self) -> Box<dyn Iterator<Item = Option<Packet>> + Send + Sync> {
         self.bus.iter()
     }
 }

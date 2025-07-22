@@ -2,7 +2,7 @@ use std::{thread, time::Duration};
 
 use anyhow::{anyhow, Result};
 
-use crate::{connection::Connection, packet::J1939Packet, uds::UdsBuffer};
+use crate::{connection::Connection, j1939_packet::J1939Packet, packet::Packet, uds::UdsBuffer};
 
 pub struct Iso15765<'a> {
     connection: &'a mut dyn Connection,
@@ -45,22 +45,19 @@ impl<'a> Iso15765<'a> {
                 payload.push(0xFF);
             }
             let p = J1939Packet::new(None, 1, self.send_header | 0x18000000, &payload);
-            self.connection.send(&p)?;
+            self.connection.send(&p.into())?;
         }
         Ok(())
     }
-    pub fn receive(
-        mut self,
-        iter: &mut dyn Iterator<Item = J1939Packet>,
-    ) -> Result<Option<UdsBuffer>> {
+    pub fn receive(mut self, iter: &mut dyn Iterator<Item = Packet>) -> Result<Option<UdsBuffer>> {
         let p = iter
-            .filter(|p| p.id() & 0xFFFFFF == self.receive_header)
+            .filter(|p| p.id & 0xFFFFFF == self.receive_header)
             .next();
         if let Some(p) = p {
-            if p.data()[0] & 0xF0 == 0x00 {
-                Ok(Some(p.data()[1..8].to_vec()))
+            if p.payload[0] & 0xF0 == 0x00 {
+                Ok(Some(p.payload[1..8].to_vec()))
             } else {
-                self.transport_receive(p)
+                self.transport_receive(&p)
             }
         } else {
             Err(anyhow!("No response"))
@@ -71,17 +68,18 @@ impl<'a> Iso15765<'a> {
         let size = req.len();
         let payload = [&[0x10 | (0xF & (size >> 8) as u8), size as u8], &req[0..6]].concat();
         let first_frame =
-            J1939Packet::new_packet(None, 1, 0x6, self.pgn, self.da, self.sa, payload.as_slice());
+            J1939Packet::new_packet(None, 1, 0x6, self.pgn, self.da, self.sa, payload.as_slice())
+                .into();
         let mut flow_control_stream = self.connection.iter_for(Duration::from_secs(2));
         self.connection.send(&first_frame)?;
 
         // response to flow control
-        let flow_control = flow_control_stream.find(|p| p.id() & 0xFFFFFF == self.receive_header);
+        let flow_control = flow_control_stream.find(|p| p.id & 0xFFFFFF == self.receive_header);
         match flow_control {
             Some(p) => {
-                if p.data()[0] == 0x7F {
+                if p.payload[0] == 0x7F {
                     Err(anyhow!("NACK: {req:?} -> {p}"))
-                } else if p.data()[0] != 0x30 {
+                } else if p.payload[0] != 0x30 {
                     Err(anyhow!(
                         "Unexpected: {req:?} -> {p} should this be ignored?"
                     ))
@@ -89,9 +87,9 @@ impl<'a> Iso15765<'a> {
                     // validate response?
 
                     // FIXME use block size and flow control!
-                    let block_size = p.data()[1];
+                    let block_size = p.payload[1];
 
-                    let interpacket_delay = p.data()[2] as u64;
+                    let interpacket_delay = p.payload[2] as u64;
                     let interpacket_delay = if interpacket_delay > 0xF0 && interpacket_delay < 0xFA
                     {
                         Duration::from_micros(100 * (0xF & interpacket_delay))
@@ -125,7 +123,7 @@ impl<'a> Iso15765<'a> {
                             self.sa,
                             payload.as_slice(),
                         );
-                        self.connection.send(&consecutive)?;
+                        self.connection.send(&consecutive.into())?;
                     }
 
                     Ok(())
@@ -135,25 +133,26 @@ impl<'a> Iso15765<'a> {
         }
     }
 
-    fn transport_receive(&mut self, p: J1939Packet) -> Result<Option<Vec<u8>>> {
+    fn transport_receive(&mut self, packet: &Packet) -> Result<Option<Vec<u8>>> {
         let stream = self.connection.iter_for(self.duration);
 
         // send flow control
         let payload = [0x30, 0, 0, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF];
-        let packet = &J1939Packet::new_packet(None, 1, 0x6, self.pgn, self.da, self.sa, &payload);
-        self.connection.send(packet)?;
+        let flow_control =
+            J1939Packet::new_packet(None, 1, 0x6, self.pgn, self.da, self.sa, &payload);
+        self.connection.send(&flow_control.into())?;
 
         // receive all payload
         let mut result = Vec::new();
-        result.extend(p.data()[2..].iter());
+        result.extend(packet.payload[2..].iter());
 
-        let len = (0xf & p.data()[0] as u32) << 8 | (p.data()[1] as u32);
+        let len = (0xf & packet.payload[0] as u32) << 8 | (packet.payload[1] as u32);
         let frames = 1 + (len - 6) / 7;
         stream
-            .filter(|p| p.id() & 0xFFFFFF == self.receive_header)
+            .filter(|p| p.id & 0xFFFFFF == self.receive_header)
             // exit as soon as we have all the frames
             .take(frames as usize)
-            .for_each(|p| result.extend(p.data()[1..].iter()));
+            .for_each(|p| result.extend(p.payload[1..].iter()));
         // trim padding
         result.truncate(len as usize);
         Ok(Some(result))
@@ -173,12 +172,12 @@ mod tests {
         let mut stream = connection.iter_for(Duration::from_secs(2));
         let mut tp = Iso15765::new(&mut connection, 0xDA00, Duration::from_secs(2), 0xF9, 0);
         tp.send(&[1, 2, 3].to_vec())?;
-        let packet = stream.find(|p| p.id() == 0x18DA00F9).unwrap();
+        let packet = stream.find(|p| p.id == 0x18DA00F9).unwrap();
         eprintln!("packet {packet:X?}",);
-        assert_eq!(0x18DA00F9, packet.id());
+        assert_eq!(0x18DA00F9, packet.id);
         assert_eq!(
             [0x03, 0x01, 0x02, 0x03, 0xFF, 0xFF, 0xFF, 0xFF],
-            packet.data()
+            packet.payload[0..8]
         );
         Ok(())
     }

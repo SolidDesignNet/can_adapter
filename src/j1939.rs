@@ -3,11 +3,7 @@ use std::{collections::HashMap, time::Duration};
 use anyhow::{Context, Result};
 use clap_num::maybe_hex;
 
-use crate::{
-    connection::Connection,
-    packet::J1939Packet,
-    CanContext,
-};
+use crate::{connection::Connection, j1939_packet::J1939Packet, packet::Packet, CanContext};
 use clap::Parser;
 
 #[derive(Parser, Debug, Clone)]
@@ -64,7 +60,7 @@ impl J1939 {
         }
     }
     pub fn request(
-        connection: & (dyn Connection),
+        connection: &(dyn Connection),
         duration: Duration,
         transport_protocol: bool,
         sa: u8,
@@ -78,7 +74,7 @@ impl J1939 {
             0x18EA0000 | ((da as u32) << 8) | (sa as u32),
             pgn.to_le_bytes()[0..3].into(),
         );
-        connection.send(&packet)?;
+        connection.send(&packet.into())?;
 
         let mut response_id = pgn << 8 | (da as u32);
         if pgn < 0xF000 {
@@ -87,9 +83,9 @@ impl J1939 {
         let predicate = |p: &J1939Packet| p.id() & 0xFFFFFF == response_id;
 
         let packet = if transport_protocol {
-            J1939::receive_tp(connection, sa, false, &mut iter).find(predicate)
+            J1939::receive_tp(connection, sa, false, &mut iter.map(|p| p.into())).find(predicate)
         } else {
-            iter.into_iter().find(predicate)
+            iter.map(|o| o.into()).find(predicate)
         };
         Ok(packet)
     }
@@ -97,7 +93,7 @@ impl J1939 {
         if packet.len() > 8 {
             J1939::send_tp(connection, packet)
         } else {
-            connection.send(packet)?;
+            connection.send(&packet.into())?;
             Ok(())
         }
     }
@@ -124,14 +120,14 @@ impl J1939 {
             (pgn >> 16) as u8,
         ];
         let bam = J1939Packet::new(None, 0, 0x18ECFF00 | (packet.source() as u32), &payload);
-        connection.send(&bam)?;
+        connection.send(&bam.into())?;
 
         for seq in 1..=count {
             let start = (seq as usize - 1) * 7;
             let end = Ord::min(start + 7, packet.data().len());
             let payload = &[&[seq][..], &packet.data()[start..end]].concat();
             let dt = J1939Packet::new(None, 0, 0x18EBFF00 | (packet.source() as u32), payload);
-            connection.send(&dt)?;
+            connection.send(&dt.into())?;
         }
         Ok(())
     }
@@ -151,11 +147,14 @@ impl J1939 {
             (pgn >> 8) as u8,
             (pgn >> 16) as u8,
         ];
-        let mut cts_iter = connection.iter_for(J1939::T3);
+        fn into_j1939packet(p: Packet) -> J1939Packet {
+            p.into()
+        }
+        let mut cts_iter = connection.iter_for(J1939::T3).map(into_j1939packet);
         let control_id = 0x18EC0000 | ((packet.dest() as u32) << 8) | (packet.source() as u32);
         let data_id = 0x18EB0000 | ((packet.dest() as u32) << 8) | (packet.source() as u32);
         let rts = J1939Packet::new(None, 0, control_id, &payload);
-        connection.send(&rts)?;
+        connection.send(&rts.into())?;
         loop {
             let cts = cts_iter
                 .find(|p| p.id() & 0xFFFFFF == rx_id)
@@ -179,15 +178,15 @@ impl J1939 {
                     data_id,
                     &[&[seq], &packet.data()[start..end]].concat(),
                 );
-                connection.send(&dt)?;
+                connection.send(&dt.into())?;
             }
-            cts_iter = connection.iter_for(J1939::T3);
+            cts_iter = connection.iter_for(J1939::T3).map(into_j1939packet);
         }
         Ok(())
     }
 
     pub fn receive_tp<'a>(
-        connection: &'a  dyn Connection,
+        connection: &'a dyn Connection,
         addr: u8,
         passive: bool,
         iter: &'a mut dyn Iterator<Item = J1939Packet>,
@@ -225,7 +224,7 @@ impl J1939 {
     }
 
     fn control(
-        connection: & dyn Connection,
+        connection: &dyn Connection,
         table: &mut HashMap<u8, TPDescriptor>,
         passive: bool,
         p: &J1939Packet,
@@ -261,7 +260,7 @@ impl J1939 {
                 ];
                 let cts =
                     J1939Packet::new_packet(None, 1, 0x6, 0xEC00, p.source(), p.dest(), &data);
-                connection.send(&cts)?;
+                connection.send(&cts.into())?;
             }
         } else if command == 0xFF {
             // cancel
@@ -271,7 +270,7 @@ impl J1939 {
     }
 
     fn data(
-        connection: & dyn Connection,
+        connection: &dyn Connection,
         table: &mut HashMap<u8, TPDescriptor>,
         passive: bool,
         p: &J1939Packet,
@@ -316,9 +315,9 @@ impl J1939 {
                             p.dest(),
                             &data,
                         );
-                        connection.send(&eom)?;
+                        connection.send(&eom.clone().into())?;
 
-                        vec![eom, packet]
+                        vec![eom.into(), packet]
                     } else {
                         vec![packet]
                     }
@@ -349,7 +348,9 @@ mod tests {
         let mut rx_connection = Box::new(SimulatedConnection::new()?);
         let mut tx_connection = rx_connection.clone();
 
-        let mut iter = rx_connection.iter_for(Duration::from_secs(2));
+        let mut iter = rx_connection
+            .iter_for(Duration::from_secs(2))
+            .map(|p| p.into());
 
         let payload: &[u8] = &[&[0, 0, 0, 1], "Something".as_bytes()].concat()[..];
         let tx = J1939Packet::new(None, 0, 0x18D3FF00, payload);
@@ -370,7 +371,9 @@ mod tests {
         let log = rx_connection.iter_for(Duration::from_secs(3));
         thread::spawn(move || log.for_each(|p| eprintln!("p: {p:?}")));
 
-        let mut iter = rx_connection.iter_for(Duration::from_secs(2));
+        let mut iter = rx_connection
+            .iter_for(Duration::from_secs(2))
+            .map(|p| p.into());
 
         let payload: &[u8] = &[&[0, 0, 0, 1], "Something".as_bytes()].concat()[..];
         let tx = J1939Packet::new(None, 0, 0x18D3F903, payload);

@@ -1,4 +1,5 @@
 use anyhow::Context;
+use anyhow::Result;
 use color_print::cformat;
 use socketcan::enumerate;
 use socketcan::CanFrame;
@@ -21,7 +22,8 @@ use crate::connection::Connection;
 use crate::connection::ConnectionFactory;
 use crate::connection::DeviceDescriptor;
 use crate::connection::ProtocolDescriptor;
-use crate::packet::J1939Packet;
+use crate::j1939_packet::J1939Packet;
+use crate::packet::Packet;
 use crate::pushbus::PushBus;
 
 /// ```sh
@@ -36,7 +38,7 @@ use crate::pushbus::PushBus;
 #[derive(Clone)]
 pub struct SocketCanConnection {
     socket: Arc<Mutex<CanSocket>>,
-    bus: PushBus<J1939Packet>,
+    bus: PushBus<Packet>,
     running: Arc<AtomicBool>,
     start: SystemTime,
 }
@@ -73,12 +75,15 @@ impl SocketCanConnection {
                 if 0xFFFF & (frame.can_id >> 8) == 0xFEEC {
                     eprintln!("{:X} {:X?}", frame.can_id, frame.data)
                 }
-                Some(J1939Packet::new_socketcan(
-                    self.now(),
-                    false,
-                    frame.can_id & 0x7FFFFFFF,
-                    &frame.data[..len],
-                ))
+                Some(
+                    J1939Packet::new_socketcan(
+                        self.now(),
+                        false,
+                        frame.can_id & 0x7FFFFFFF,
+                        &frame.data[..len],
+                    )
+                    .into(),
+                )
             } else {
                 const ONE_MILLI: Duration = Duration::from_millis(1);
                 std::thread::sleep(ONE_MILLI);
@@ -96,31 +101,29 @@ impl SocketCanConnection {
 }
 
 impl Connection for SocketCanConnection {
-    fn send(& self, packet: &J1939Packet) -> Result<J1939Packet, anyhow::Error> {
+    fn send(&self, packet: &Packet) -> Result<Packet> {
         // listen for echo
         let mut i = self.iter_for(Duration::from_millis(1000));
 
         // send packet
         {
-            let frame = CanFrame::from_raw_id(packet.id(), packet.data()).expect("Invalid data packet");
+            let frame =
+                CanFrame::from_raw_id(packet.id, &packet.payload).expect("Invalid data packet");
             let mut can_socket = self.socket.lock().unwrap();
             can_socket.write_frame(&frame)?;
             can_socket.flush()?;
         }
-        self.bus.push(Some(J1939Packet::new_socketcan(
-            self.now(),
-            true,
-            packet.id(),
-            packet.data(),
-        )));
+        self.bus.push(Some(
+            J1939Packet::new_socketcan(self.now(), true, packet.id, &packet.payload).into(),
+        ));
 
         i.find(
-            move |p| p.id() == packet.id(), /*&& p.data() == packet.data()*/
+            move |p| p.id == packet.id, /*&& p.data() == packet.data()*/
         )
         .context("no echo")
     }
 
-    fn iter(&self) -> Box<dyn Iterator<Item = Option<J1939Packet>> + Send + Sync> {
+    fn iter(&self) -> Box<dyn Iterator<Item = Option<Packet>> + Send + Sync> {
         self.bus.iter()
     }
 }
