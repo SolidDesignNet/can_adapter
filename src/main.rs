@@ -1,7 +1,4 @@
-use std::{
-    thread,
-    time::{Duration, Instant, SystemTime},
-};
+use std::time::{Duration, Instant, SystemTime};
 
 use anyhow::Result;
 use clap::*;
@@ -31,7 +28,7 @@ pub mod socketcanconnection;
 #[cfg(target_os = "linux")]
 use socketcanconnection::SocketCanConnection;
 
-use crate::j1939_packet::J1939Packet;
+use crate::{j1939_packet::J1939Packet, packet::Packet};
 
 #[derive(Parser)] // requires `derive` feature
 #[command(name = "cancan")]
@@ -247,8 +244,8 @@ pub fn main() -> Result<()> {
 }
 
 fn send(can_can: &mut CanContext, id: u32, payload: &[u8]) -> Result<()> {
-    let packet = J1939Packet::new(None, 1, id, payload);
-    can_can.connection.send(&packet.into())?;
+    let packet = Packet::new(id, payload);
+    can_can.connection.send(&packet)?;
     Ok(())
 }
 
@@ -376,7 +373,6 @@ fn server(cli: &mut CanContext) -> Result<()> {
 }
 
 fn vin(can_can: &mut CanContext) -> Result<()> {
-    let source_address = can_can.can_can.source_address;
     let connection = can_can.connection.as_mut();
     {
         eprintln!("request VIN from ECM");

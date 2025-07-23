@@ -8,7 +8,7 @@ pub struct Packet {
 }
 
 #[derive(Debug, Clone)]
-enum PacketState {
+pub enum PacketState {
     TX,
     RX { time: Duration, channel: u32 },
 }
@@ -41,19 +41,19 @@ impl Packet {
     pub fn time(&self) -> Option<Duration> {
         match self.state {
             PacketState::TX => None,
-            PacketState::RX { time, channel } => Some(time),
+            PacketState::RX { time,channel: _ } => Some(time),
         }
     }
     pub fn channel(&self) -> Option<u32> {
         match self.state {
             PacketState::TX => None,
-            PacketState::RX { time, channel } => Some(channel),
+            PacketState::RX { time:_, channel } => Some(channel),
         }
     }
     pub fn is_tx(&self) -> bool {
         match self.state {
             PacketState::TX => true,
-            PacketState::RX { time, channel } => false,
+            PacketState::RX { time:_, channel:_ } => false,
         }
     }
 

@@ -23,7 +23,6 @@ use crate::connection::Connection;
 use crate::connection::ConnectionFactory;
 use crate::connection::DeviceDescriptor;
 use crate::connection::ProtocolDescriptor;
-use crate::j1939_packet::J1939Packet;
 use crate::packet::Packet;
 use crate::pushbus::PushBus;
 
@@ -68,7 +67,6 @@ impl SocketCanConnection {
     }
     fn run(&mut self) {
         self.running.store(true, Ordering::Relaxed);
-        let start = Instant::now();
         while self.running.load(Ordering::Relaxed) {
             let read_raw_frame = self.socket.lock().unwrap().read_raw_frame();
             let p = if read_raw_frame.is_ok() {
@@ -80,7 +78,7 @@ impl SocketCanConnection {
                 Some(Packet::new_rx(
                     frame.can_id & 0x7FFFFFFF,
                     &frame.data[..len],
-                    Instant::now().duration_since(start),
+                    self.now(),
                     0,
                 ))
             } else {
@@ -91,11 +89,10 @@ impl SocketCanConnection {
             self.bus.push(p);
         }
     }
-    fn now(&self) -> u32 {
+    fn now(&self) -> Duration {
         SystemTime::now()
             .duration_since(self.start)
             .expect("Time went backwards")
-            .as_millis() as u32
     }
 }
 

@@ -7,7 +7,6 @@ use std::time::Duration;
 
 /// PushBusIter is an experiment to use array based queues per thread, instead of a shared Linked List.
 /// Most CPU time is used reading the RP1210 adapter, so the Bus isn't a significant contributer to CPU usage.
-
 pub struct PushBus<T> {
     iters: Arc<Mutex<Vec<PushBusIter<T>>>>,
     name: String,
@@ -118,7 +117,7 @@ mod tests {
     use crate::pushbus::PushBus;
     #[test]
     fn test_clone() {
-        let mut pb1 = PushBus::new("test");
+        let pb1 = PushBus::new("test");
         let pb2 = pb1.clone();
 
         let mut i1 = pb1.iter();

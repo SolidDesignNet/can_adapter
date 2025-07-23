@@ -48,25 +48,18 @@ impl J1939Packet {
         data: &[u8],
     ) -> J1939Packet {
         let da = if pgn >= 0xF000 { 0 } else { da };
-        Self::new(
-            time,
-            channel,
-            ((priority as u32) << 26)
+        {
+            let id = ((priority as u32) << 26)
                 | (pgn << 8)
                 | if pgn >= 0xf000 { 0 } else { (da as u32) << 8 }
-                | (sa as u32),
-            data,
-        )
-    }
-
-    /// FIXME - inline and cleanup
-    pub fn new(time: Option<Duration>, channel: u32, id: u32, payload: &[u8]) -> J1939Packet {
-        J1939Packet {
-            packet: if let Some(time1) = time {
-                Packet::new_rx(id, payload, time1, channel)
-            } else {
-                Packet::new(id, payload)
-            },
+                | (sa as u32);
+            J1939Packet {
+                packet: if let Some(time1) = time {
+                    Packet::new_rx(id, data, time1, channel)
+                } else {
+                    Packet::new(id, data)
+                },
+            }
         }
     }
 
@@ -101,6 +94,12 @@ impl J1939Packet {
     pub(crate) fn data(&self) -> &[u8] {
         &self.payload
     }
+
+    pub fn new(id: u32, payload: &[u8]) -> Self {
+        Self {
+            packet: Packet::new(id, payload),
+        }
+    }
 }
 
 impl Debug for J1939Packet {
@@ -124,26 +123,20 @@ mod tests {
         // channel is ignored on TX. The channel is set in `connection.send()`
         assert_eq!(
             "      0.0000 0 18FFAAFA [3] 01 02 03 (TX)",
-            J1939Packet::new(None, 1, 0x18FFAAFA, &[1, 2, 3]).to_string()
+            Packet::new(0x18FFAAFA, &[1, 2, 3]).to_string()
         );
 
         assert_eq!(
             "      0.5550 1 18FFAAFA [3] 01 02 03",
-            J1939Packet::new(Some(Duration::new(0,555_000_000)), 1, 0x18FFAAFA, &[1, 2, 3]).to_string()
+            Packet::new_rx(0x18FFAAFA, &[1, 2, 3], Duration::new(0, 555_000_000), 1,).to_string()
         );
         assert_eq!(
             "      0.0000 0 18FFAAF9 [8] 01 02 03 04 05 06 07 08 (TX)",
-            J1939Packet::new(None, 2, 0x18FFAAF9, &[1, 2, 3, 4, 5, 6, 7, 8]).to_string()
+            Packet::new(0x18FFAAF9, &[1, 2, 3, 4, 5, 6, 7, 8]).to_string()
         );
         assert_eq!(
             "      0.0000 0 18FFAAFB [8] FF 00 FF 00 FF 00 FF 00 (TX)",
-            J1939Packet::new(
-                None,
-                3,
-                0x18FFAAFB,
-                &[0xFF, 00, 0xFF, 00, 0xFF, 00, 0xFF, 00]
-            )
-            .to_string()
+            Packet::new(0x18FFAAFB, &[0xFF, 00, 0xFF, 00, 0xFF, 00, 0xFF, 00]).to_string()
         );
     }
 }
