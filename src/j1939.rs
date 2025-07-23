@@ -5,6 +5,7 @@ use clap_num::maybe_hex;
 
 use crate::{connection::Connection, j1939_packet::J1939Packet, packet::Packet, CanContext};
 use clap::Parser;
+use zerocopy::*;
 
 #[derive(Parser, Debug, Clone)]
 pub enum J1939 {
@@ -59,6 +60,7 @@ impl J1939 {
             J1939::AddressClaim { did } => todo!(),
         }
     }
+
     pub fn request(
         connection: &(dyn Connection),
         duration: Duration,
@@ -137,23 +139,25 @@ impl J1939 {
         let pgn = packet.pgn();
         let size = packet.data().len();
         let count = (1 + size / 7) as u8;
-        let payload = [
-            0x10u8,
-            size as u8,
-            (size >> 8) as u8,
-            count,
-            0xFF,
-            pgn as u8,
-            (pgn >> 8) as u8,
-            (pgn >> 16) as u8,
-        ];
         fn into_j1939packet(p: Packet) -> J1939Packet {
             p.into()
         }
         let mut cts_iter = connection.iter_for(J1939::T3).map(into_j1939packet);
         let control_id = 0x18EC0000 | ((packet.dest() as u32) << 8) | (packet.source() as u32);
         let data_id = 0x18EB0000 | ((packet.dest() as u32) << 8) | (packet.source() as u32);
-        let rts = J1939Packet::new(None, 0, control_id, &payload);
+        let rts = J1939Packet::new(
+            None,
+            0,
+            control_id,
+            J1939_21TpCmRts {
+                control: 0x10,
+                size: size as u16,
+                count,
+                allowed: 0xFF,
+                pgn: pgn.into(),
+            }
+            .as_bytes(),
+        );
         connection.send(&rts.into())?;
         loop {
             let cts = cts_iter
@@ -236,30 +240,36 @@ impl J1939 {
             pgn.push(0);
             let size = u16::from_le_bytes((p.data()[1..3]).try_into().unwrap());
             let count = p.data()[3];
+            let pgn = u32::from_le_bytes(pgn[0..4].try_into().unwrap());
             table.insert(
                 p.source(),
                 TPDescriptor {
                     size,
                     count,
-                    pgn: u32::from_le_bytes(pgn[0..4].try_into().unwrap()),
+                    pgn,
                     data: Vec::new(),
                     timestamp: Some(p.time()),
                 },
             );
             if !passive {
                 // send CTS
-                let data = [
-                    0x11,
-                    count,
+                let cts = J1939Packet::new_packet(
+                    None,
                     1,
-                    0xFF,
-                    0xFF,
-                    p.data()[5],
-                    p.data()[6],
-                    p.data()[7],
-                ];
-                let cts =
-                    J1939Packet::new_packet(None, 1, 0x6, 0xEC00, p.source(), p.dest(), &data);
+                    0x6,
+                    0xEC00,
+                    p.source(),
+                    p.dest(),
+                    J1939_21TpCmCts {
+                        control: 0x11,
+                        count,
+                        next: 1,
+                        /// FIXME
+                        reserved: 0xFFFF,
+                        pgn: pgn.into(),
+                    }
+                    .as_bytes(),
+                );
                 connection.send(&cts.into())?;
             }
         } else if command == 0xFF {
@@ -285,17 +295,6 @@ impl J1939 {
                 if d.data.len() >= d.size as usize {
                     d.data.truncate(d.size as usize);
 
-                    // send CTS
-                    let data = [
-                        0x13,
-                        d.size as u8,
-                        (d.size >> 8) as u8,
-                        d.count,
-                        0xFF,
-                        (d.pgn >> 16) as u8,
-                        (d.pgn >> 8) as u8,
-                        (d.pgn) as u8,
-                    ];
                     let packet = J1939Packet::new_packet(
                         Some(p.time()),
                         0,
@@ -313,11 +312,18 @@ impl J1939 {
                             0xEC00,
                             p.source(),
                             p.dest(),
-                            &data,
+                            J1939_21TpCmEOM {
+                                control: 0x13,
+                                size: d.size,
+                                count: d.count,
+                                reserved: 0xFF,
+                                pgn: d.pgn.into(),
+                            }
+                            .as_bytes(),
                         );
                         connection.send(&eom.clone().into())?;
 
-                        vec![eom.into(), packet]
+                        vec![eom, packet]
                     } else {
                         vec![packet]
                     }
@@ -334,6 +340,71 @@ impl J1939 {
         Ok(r)
     }
 }
+
+#[repr(C, packed)]
+#[derive(Immutable, IntoBytes, TryFromBytes)]
+struct u24 {
+    value: [u8; 3],
+}
+
+impl From<u32> for u24 {
+    fn from(v: u32) -> Self {
+        let mut value = [0u8; 3];
+        value.copy_from_slice(&v.as_bytes()[0..3]);
+        u24 { value }
+    }
+}
+impl From<u24> for u32 {
+    fn from(v: u24) -> Self {
+        u32::from_be_bytes([0, v.value[0], v.value[1], v.value[2]])
+    }
+}
+
+#[repr(C, packed)]
+#[derive(Immutable, IntoBytes, TryFromBytes)]
+struct J1939_21TpCmRts {
+    control: u8,
+    size: u16,
+    count: u8,
+    allowed: u8,
+    pgn: u24,
+}
+#[repr(C, packed)]
+#[derive(Immutable, IntoBytes, TryFromBytes)]
+struct J1939_21TpCmCts {
+    control: u8,
+    count: u8,
+    next: u8,
+    reserved: u16,
+    pgn: u24,
+}
+#[repr(C, packed)]
+#[derive(Immutable, IntoBytes, TryFromBytes)]
+struct J1939_21TpCmEOM {
+    control: u8,
+    size: u16,
+    count: u8,
+    reserved: u8,
+    pgn: u24,
+}
+#[repr(C, packed)]
+#[derive(Immutable, IntoBytes, TryFromBytes)]
+struct J1939_21TpConnAbort {
+    control: u8,
+    reason: u8,
+    reserved: u24,
+    pgn: u24,
+}
+#[repr(C, packed)]
+#[derive(Immutable, IntoBytes, TryFromBytes)]
+struct J1939_21TpBAM {
+    control: u8,
+    size: u16,
+    count: u8,
+    reserved: u8,
+    pgn: u24,
+}
+
 #[cfg(test)]
 mod tests {
     use std::thread;

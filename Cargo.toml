@@ -24,8 +24,9 @@ rust-ini = "0.21.1"
 clap = { version = "4.5.40", features = ["derive"] }
 clap-num = "1.2.0"
 color-print = { version = "0.3.7" }
-dbg_hex={version="0.2.0"}
-serialport="4.7.2"
+dbg_hex = { version = "0.2.0" }
+serialport = "4.7.2"
+zerocopy = { version = "0.8.26", features = ["derive"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 socketcan = { version = "3.5.0", features = ["enumerate"] }

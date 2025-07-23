@@ -14,7 +14,7 @@ pub struct J1939Packet {
 
 impl From<Packet> for J1939Packet {
     fn from(value: Packet) -> Self {
-        (&value).into()
+        J1939Packet::from(&value)
     }
 }
 impl From<&Packet> for J1939Packet {
@@ -32,7 +32,7 @@ impl From<&Packet> for J1939Packet {
 
 impl From<J1939Packet> for Packet {
     fn from(value: J1939Packet) -> Self {
-        (&value).into()
+        Packet::from(&value)
     }
 }
 impl From<&J1939Packet> for Packet {
