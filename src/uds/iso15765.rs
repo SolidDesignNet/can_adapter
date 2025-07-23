@@ -2,7 +2,7 @@ use std::{thread, time::Duration};
 
 use anyhow::{anyhow, Result};
 
-use crate::{connection::Connection, j1939_packet::J1939Packet, packet::Packet, uds::UdsBuffer};
+use crate::{connection::Connection, packet::Packet, uds::UdsBuffer};
 
 pub struct Iso15765<'a> {
     connection: &'a mut dyn Connection,
@@ -44,8 +44,8 @@ impl<'a> Iso15765<'a> {
             while payload.len() < 8 {
                 payload.push(0xFF);
             }
-            let p = J1939Packet::new(None, 1, self.send_header | 0x18000000, &payload);
-            self.connection.send(&p.into())?;
+            let p = Packet::new(self.send_header | 0x18000000, &payload);
+            self.connection.send(&p)?;
         }
         Ok(())
     }
@@ -67,9 +67,7 @@ impl<'a> Iso15765<'a> {
         // send first frame
         let size = req.len();
         let payload = [&[0x10 | (0xF & (size >> 8) as u8), size as u8], &req[0..6]].concat();
-        let first_frame =
-            J1939Packet::new_packet(None, 1, 0x6, self.pgn, self.da, self.sa, payload.as_slice())
-                .into();
+        let first_frame = Packet::new(self.send_header, &payload);
         let mut flow_control_stream = self.connection.iter_for(Duration::from_secs(2));
         self.connection.send(&first_frame)?;
 
@@ -114,16 +112,8 @@ impl<'a> Iso15765<'a> {
                         while payload.len() < 8 {
                             payload.push(0xFF);
                         }
-                        let consecutive = J1939Packet::new_packet(
-                            None,
-                            1,
-                            0x6,
-                            self.pgn,
-                            self.da,
-                            self.sa,
-                            payload.as_slice(),
-                        );
-                        self.connection.send(&consecutive.into())?;
+                        let consecutive = Packet::new(self.send_header, &payload);
+                        self.connection.send(&consecutive)?;
                     }
 
                     Ok(())
@@ -138,9 +128,8 @@ impl<'a> Iso15765<'a> {
 
         // send flow control
         let payload = [0x30, 0, 0, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF];
-        let flow_control =
-            J1939Packet::new_packet(None, 1, 0x6, self.pgn, self.da, self.sa, &payload);
-        self.connection.send(&flow_control.into())?;
+        let flow_control = Packet::new(self.send_header, &payload);
+        self.connection.send(&flow_control)?;
 
         // receive all payload
         let mut result = Vec::new();
@@ -192,8 +181,6 @@ mod tests {
         thread::spawn(move || {
             let mut tx_tp = Iso15765::new(tx_connection.as_mut(), 0xDA00, DURATION, 0xF9, 0);
             tx_tp.send(&[0x55; 14].to_vec()).expect("Failed to send");
-            // FIXME: this is required, because when connection goes out of scope it closes the bus, that is shared between the connections.
-            //thread::sleep(Duration::from_secs(1));
         });
 
         let rx_tp = Iso15765::new(rx_connection.as_mut(), 0xDA00, DURATION, 0, 0xF9);

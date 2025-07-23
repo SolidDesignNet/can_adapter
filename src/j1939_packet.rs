@@ -1,106 +1,46 @@
-use std::fmt::*;
+use std::{fmt::*, ops::Deref, time::Duration};
 
 use crate::packet::Packet;
 
-#[derive(Default, Clone)]
+#[derive(Clone)]
 pub struct J1939Packet {
-    id: u32,
-    payload: Vec<u8>,
-    tx: bool,
-    channel: u8,
-    time_stamp_weight: f64,
-    time: u32,
+    packet: Packet,
 }
 
 impl From<Packet> for J1939Packet {
     fn from(value: Packet) -> Self {
-        J1939Packet::from(&value)
+        J1939Packet { packet: value }
     }
 }
 impl From<&Packet> for J1939Packet {
     fn from(value: &Packet) -> Self {
         J1939Packet {
-            id: value.id,
-            payload: value.payload.clone(),
-            tx: value.tx,
-            channel: 0,
-            time_stamp_weight: 1.0,
-            time: value.time as u32,
+            packet: value.clone(),
         }
     }
 }
-
 impl From<J1939Packet> for Packet {
     fn from(value: J1939Packet) -> Self {
-        Packet::from(&value)
+        value.packet
     }
 }
 impl From<&J1939Packet> for Packet {
     fn from(value: &J1939Packet) -> Self {
-        Packet {
-            id: value.id,
-            payload: value.payload.clone(),
-            tx: value.tx,
-            time: value.time_stamp_weight * (value.time as f64),
-        }
+        value.packet.clone()
     }
 }
-impl Debug for J1939Packet {
-    fn fmt(&self, f: &mut Formatter<'_>) -> Result {
-        Display::fmt(&self, f)
-    }
-}
-impl Display for J1939Packet {
-    fn fmt(&self, f: &mut Formatter) -> Result {
-        write!(
-            f,
-            "{:12.4} {} {} [{}] {}{}",
-            self.time(),
-            self.channel(),
-            self.header(),
-            self.len(),
-            self.data_str(),
-            if self.tx { " (TX)" } else { "" }
-        )
-    }
-}
+impl Deref for J1939Packet {
+    type Target = Packet;
 
-fn as_hex(data: &[u8]) -> String {
-    if data.is_empty() {
-        return "".to_string();
+    fn deref(&self) -> &Self::Target {
+        &self.packet
     }
-    // FIXME optimize
-    let mut s = String::new();
-    for byte in data {
-        write!(&mut s, " {byte:02X}").expect("Unable to write");
-    }
-    s[1..].to_string()
-}
-fn as_hex_nospace(data: &[u8]) -> String {
-    // FIXME optimize
-    let mut s = String::new();
-    for byte in data {
-        write!(&mut s, "{byte:02X}").expect("Unable to write");
-    }
-    s
 }
 
 impl J1939Packet {
-    pub fn len(&self) -> usize {
-        self.payload.len()
-    }
-
-    #[must_use]
-    pub fn is_empty(&self) -> bool {
-        self.len() == 0
-    }
-    pub fn time(&self) -> u32 {
-        self.time
-    }
-
     pub fn new_packet(
-        time: Option<u32>,
-        channel: u8,
+        time: Option<Duration>,
+        channel: u32,
         priority: u8,
         pgn: u32,
         da: u8,
@@ -119,25 +59,14 @@ impl J1939Packet {
         )
     }
 
-    pub fn new(time: Option<u32>, channel: u8, id: u32, payload: &[u8]) -> J1939Packet {
+    /// FIXME - inline and cleanup
+    pub fn new(time: Option<Duration>, channel: u32, id: u32, payload: &[u8]) -> J1939Packet {
         J1939Packet {
-            id,
-            payload: payload.into(),
-            tx: time.is_none(),
-            channel,
-            time_stamp_weight: 1000.0,
-            time: time.unwrap_or(0u32),
-        }
-    }
-
-    pub fn new_socketcan(time: u32, tx: bool, id: u32, payload: &[u8]) -> J1939Packet {
-        J1939Packet {
-            id,
-            payload: payload.into(),
-            tx,
-            channel: 0,
-            time_stamp_weight: 1000.0,
-            time,
+            packet: if let Some(time1) = time {
+                Packet::new_rx(id, payload, time1, channel)
+            } else {
+                Packet::new(id, payload)
+            },
         }
     }
 
@@ -169,24 +98,19 @@ impl J1939Packet {
         self.id
     }
 
-    pub fn data_str(&self) -> String {
-        as_hex(self.data())
-    }
-
-    pub fn data_str_nospace(&self) -> String {
-        as_hex_nospace(self.data())
-    }
-
-    pub fn data(&self) -> &[u8] {
+    pub(crate) fn data(&self) -> &[u8] {
         &self.payload
     }
+}
 
-    pub fn channel(&self) -> u8 {
-        self.channel
+impl Debug for J1939Packet {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result {
+        Debug::fmt(&self.packet, f)
     }
-
-    pub fn time_stamp_weight(&self) -> f64 {
-        self.time_stamp_weight
+}
+impl Display for J1939Packet {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result {
+        Display::fmt(&self.packet, f)
     }
 }
 
@@ -197,20 +121,22 @@ mod tests {
 
     #[test]
     fn test_j1939packet_display() {
+        // channel is ignored on TX. The channel is set in `connection.send()`
         assert_eq!(
-            "           0 1 18FFAAFA [3] 01 02 03 (TX)",
+            "      0.0000 0 18FFAAFA [3] 01 02 03 (TX)",
             J1939Packet::new(None, 1, 0x18FFAAFA, &[1, 2, 3]).to_string()
         );
+
         assert_eq!(
-            "         555 1 18FFAAFA [3] 01 02 03",
-            J1939Packet::new(Some(555), 1, 0x18FFAAFA, &[1, 2, 3]).to_string()
+            "      0.5550 1 18FFAAFA [3] 01 02 03",
+            J1939Packet::new(Some(Duration::new(0,555_000_000)), 1, 0x18FFAAFA, &[1, 2, 3]).to_string()
         );
         assert_eq!(
-            "           0 2 18FFAAF9 [8] 01 02 03 04 05 06 07 08 (TX)",
+            "      0.0000 0 18FFAAF9 [8] 01 02 03 04 05 06 07 08 (TX)",
             J1939Packet::new(None, 2, 0x18FFAAF9, &[1, 2, 3, 4, 5, 6, 7, 8]).to_string()
         );
         assert_eq!(
-            "           0 3 18FFAAFB [8] FF 00 FF 00 FF 00 FF 00 (TX)",
+            "      0.0000 0 18FFAAFB [8] FF 00 FF 00 FF 00 FF 00 (TX)",
             J1939Packet::new(
                 None,
                 3,

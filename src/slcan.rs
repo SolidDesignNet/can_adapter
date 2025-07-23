@@ -10,7 +10,6 @@ use serialport::{SerialPort, SerialPortInfo};
 
 use crate::{
     connection::{Connection, ConnectionFactory, DeviceDescriptor, ProtocolDescriptor},
-    j1939_packet::J1939Packet,
     packet::Packet,
     pushbus::PushBus,
 };
@@ -62,11 +61,10 @@ impl Slcan {
         eprintln!(" opened {port_name}");
         Ok(slcan)
     }
-    pub fn now(&self) -> u32 {
+    pub fn now(&self) -> Duration {
         SystemTime::now()
             .duration_since(self.start)
             .expect("Time went backwards")
-            .as_millis() as u32
     }
 
     fn run_can(&mut self, mut port: Box<dyn SerialPort>) {
@@ -143,7 +141,7 @@ impl Drop for Slcan {
 
 const SIZE: usize = 9;
 // 0CF00A00 8 FF FF 00 FE FF FF 00 00
-fn parse_result(now: u32, buf: String) -> Result<Packet> {
+fn parse_result(now: Duration, buf: String) -> Result<Packet> {
     let len = buf.len();
     // {T}{4 * 2 digit hex bytes}{1 digit length}{2 digit hex payload}
     if len < SIZE || len % 2 != 0 {
@@ -156,19 +154,18 @@ fn parse_result(now: u32, buf: String) -> Result<Packet> {
         .step_by(2)
         .map(|i| u8::from_str_radix(&buf[i..i + 2], 16))
         .collect();
-    // FIXME slcan should not have references to J1939Packet
-    Ok(J1939Packet::new(Some(now), 1, id, &payload?).into())
+    Ok(Packet::new_rx(id, &payload?, now, 0))
 }
 
 fn unparse(p: &Packet) -> String {
-    let payload = p.data_str_nospace();
+    let payload = p.payload_str_nospace();
     format!("T{:08X}{}{}", p.id, payload.len() / 2, payload)
 }
 
 impl Connection for Slcan {
     fn send(&self, packet: &Packet) -> anyhow::Result<Packet> {
         // send packet
-        self.outbound.lock().unwrap().push_back(unparse(&packet));
+        self.outbound.lock().unwrap().push_back(unparse(packet));
 
         // SLCAN does not support echo, so wait until outbound is empty;
         while !self.outbound.lock().unwrap().is_empty() {

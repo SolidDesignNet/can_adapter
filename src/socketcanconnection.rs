@@ -16,6 +16,7 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use std::thread;
 use std::time::Duration;
+use std::time::Instant;
 use std::time::SystemTime;
 
 use crate::connection::Connection;
@@ -67,6 +68,7 @@ impl SocketCanConnection {
     }
     fn run(&mut self) {
         self.running.store(true, Ordering::Relaxed);
+        let start = Instant::now();
         while self.running.load(Ordering::Relaxed) {
             let read_raw_frame = self.socket.lock().unwrap().read_raw_frame();
             let p = if read_raw_frame.is_ok() {
@@ -75,15 +77,12 @@ impl SocketCanConnection {
                 if 0xFFFF & (frame.can_id >> 8) == 0xFEEC {
                     eprintln!("{:X} {:X?}", frame.can_id, frame.data)
                 }
-                Some(
-                    J1939Packet::new_socketcan(
-                        self.now(),
-                        false,
-                        frame.can_id & 0x7FFFFFFF,
-                        &frame.data[..len],
-                    )
-                    .into(),
-                )
+                Some(Packet::new_rx(
+                    frame.can_id & 0x7FFFFFFF,
+                    &frame.data[..len],
+                    Instant::now().duration_since(start),
+                    0,
+                ))
             } else {
                 const ONE_MILLI: Duration = Duration::from_millis(1);
                 std::thread::sleep(ONE_MILLI);
@@ -113,9 +112,7 @@ impl Connection for SocketCanConnection {
             can_socket.write_frame(&frame)?;
             can_socket.flush()?;
         }
-        self.bus.push(Some(
-            J1939Packet::new_socketcan(self.now(), true, packet.id, &packet.payload).into(),
-        ));
+        self.bus.push(Some(Packet::new(packet.id, &packet.payload)));
 
         i.find(
             move |p| p.id == packet.id, /*&& p.data() == packet.data()*/

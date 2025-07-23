@@ -30,7 +30,7 @@ struct TPDescriptor {
     count: u8,
     pgn: u32,
     data: Vec<u8>,
-    timestamp: Option<u32>,
+    timestamp: Option<Duration>,
 }
 
 impl J1939 {
@@ -69,7 +69,7 @@ impl J1939 {
         da: u8,
         pgn: u32,
     ) -> Result<Option<J1939Packet>, anyhow::Error> {
-        let mut iter = connection.iter_for(duration);
+        let iter = connection.iter_for(duration);
         let packet = J1939Packet::new(
             None,
             0,
@@ -109,7 +109,7 @@ impl J1939 {
     }
     fn send_tp_bam(connection: &mut (dyn Connection), packet: &J1939Packet) -> Result<()> {
         let pgn = packet.pgn();
-        let size = packet.data().len();
+        let size = packet.len();
         let count = (1 + size / 7) as u8;
         let payload = [
             0x20u8,
@@ -126,8 +126,8 @@ impl J1939 {
 
         for seq in 1..=count {
             let start = (seq as usize - 1) * 7;
-            let end = Ord::min(start + 7, packet.data().len());
-            let payload = &[&[seq][..], &packet.data()[start..end]].concat();
+            let end = Ord::min(start + 7, packet.len());
+            let payload = &[&[seq][..], &packet.payload[start..end]].concat();
             let dt = J1939Packet::new(None, 0, 0x18EBFF00 | (packet.source() as u32), payload);
             connection.send(&dt.into())?;
         }
@@ -137,7 +137,7 @@ impl J1939 {
         let rx_id = 0xEC0000 | (packet.source() as u32) << 8 | (packet.dest() as u32);
 
         let pgn = packet.pgn();
-        let size = packet.data().len();
+        let size = packet.len();
         let count = (1 + size / 7) as u8;
         fn into_j1939packet(p: Packet) -> J1939Packet {
             p.into()
@@ -163,24 +163,39 @@ impl J1939 {
             let cts = cts_iter
                 .find(|p| p.id() & 0xFFFFFF == rx_id)
                 .context("CTS not received.")?;
-            if cts.data()[0] == 0x13 {
+            if cts.payload[0] == 0x13 {
                 // end of message
                 break;
             }
-            if cts.data()[0] == 0xFF {
+            if {
+                let this = &cts;
+                &this.payload
+            }[0] == 0xFF {
                 todo!();
                 //Err("Aborted")
             }
-            let to_send = cts.data()[1];
-            let next = cts.data()[2];
+            let to_send = {
+                let this = &cts;
+                &this.payload
+            }[1];
+            let next = {
+                let this = &cts;
+                &this.payload
+            }[2];
             for seq in next..(next + to_send) {
                 let start = (seq as usize - 1) * 7;
-                let end = Ord::min(start + 7, packet.data().len());
+                let end = Ord::min(start + 7, {
+                    let this = &packet;
+                    &this.payload
+                }.len());
                 let dt = J1939Packet::new(
                     None,
                     0,
                     data_id,
-                    &[&[seq], &packet.data()[start..end]].concat(),
+                    &[&[seq], &{
+                        let this = &packet;
+                        &this.payload
+                    }[start..end]].concat(),
                 );
                 connection.send(&dt.into())?;
             }
@@ -233,13 +248,25 @@ impl J1939 {
         passive: bool,
         p: &J1939Packet,
     ) -> Result<()> {
-        let command = p.data()[0];
+        let command = {
+            let this = &p;
+            &this.payload
+        }[0];
         if command == 0x20 || command == 0x10 {
             // RTS/BAM
-            let mut pgn = p.data()[5..8].to_vec();
+            let mut pgn = {
+                let this = &p;
+                &this.payload
+            }[5..8].to_vec();
             pgn.push(0);
-            let size = u16::from_le_bytes((p.data()[1..3]).try_into().unwrap());
-            let count = p.data()[3];
+            let size = u16::from_le_bytes(({
+                let this = &p;
+                &this.payload
+            }[1..3]).try_into().unwrap());
+            let count = {
+                let this = &p;
+                &this.payload
+            }[3];
             let pgn = u32::from_le_bytes(pgn[0..4].try_into().unwrap());
             table.insert(
                 p.source(),
@@ -248,7 +275,7 @@ impl J1939 {
                     count,
                     pgn,
                     data: Vec::new(),
-                    timestamp: Some(p.time()),
+                    timestamp: p.time(),
                 },
             );
             if !passive {
@@ -264,7 +291,6 @@ impl J1939 {
                         control: 0x11,
                         count,
                         next: 1,
-                        /// FIXME
                         reserved: 0xFFFF,
                         pgn: pgn.into(),
                     }
@@ -288,15 +314,21 @@ impl J1939 {
         let d = table.get_mut(&p.source());
         let r = match d {
             Some(d) => {
-                if p.data()[0] == (1 + d.data.len() / 7) as u8 {
-                    d.data.extend(p.data()[1..].iter());
+                if {
+                    let this = &p;
+                    &this.payload
+                }[0] == (1 + d.data.len() / 7) as u8 {
+                    d.data.extend({
+                        let this = &p;
+                        &this.payload
+                    }[1..].iter());
                 }
 
                 if d.data.len() >= d.size as usize {
                     d.data.truncate(d.size as usize);
 
                     let packet = J1939Packet::new_packet(
-                        Some(p.time()),
+                        p.time(),
                         0,
                         p.priority(),
                         d.pgn,

@@ -229,9 +229,7 @@ impl Rp1210 {
 impl Connection for Rp1210 {
     /// Send packet and return packet echoed back from adapter
     fn send(&mut self, packet: &J1939Packet) -> Result<J1939Packet> {
-        let end = Instant::now() + Duration::from_millis(50);
-        // FIXME iter_unti
-        let stream = self.bus.iter().take_while(|_| Instant::now() < end);
+        let stream = self.bus.iter_for(Duration::from_millis(50));
         let sent = self.api.send(packet);
         // FIXME needs better error handling
         sent.map(|_| {

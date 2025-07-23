@@ -234,7 +234,6 @@ pub fn main() -> Result<()> {
             log(cli)?;
         }
         CanCommand::Uds { uds } => {
-            // FIXME
             uds.execute(cli).expect("Unable to send UDS");
         }
         CanCommand::J1939 {
@@ -330,7 +329,10 @@ fn server(cli: &mut CanContext) -> Result<()> {
     for p in stream {
         if p.pgn() == PING_PGN {
             count += 1;
-            let pong = &J1939Packet::new_packet(None, 1, 6, PING_PGN, p.source(), sa, p.data());
+            let pong = &J1939Packet::new_packet(None, 1, 6, PING_PGN, p.source(), sa, {
+                let this = &p;
+                &this.payload
+            });
             if count % 10_000 == 0 {
                 eprintln!("pong: {p} -> {pong}");
             }
@@ -339,7 +341,10 @@ fn server(cli: &mut CanContext) -> Result<()> {
             count += 1;
             let this = {
                 let mut arr = [0u8; 8];
-                arr.copy_from_slice(p.data());
+                arr.copy_from_slice({
+                    let this = &p;
+                    &this.payload
+                });
                 i64::from_be_bytes(arr)
             };
             if prev + 1 != this {

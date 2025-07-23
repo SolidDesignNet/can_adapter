@@ -49,12 +49,15 @@ impl Connection for SimulatedConnection {
         let j1939: J1939Packet = packet.into();
         let packet: Packet = J1939Packet::new_packet(
             Some(now()),
-            j1939.channel(),
+            j1939.channel().unwrap_or_default(),
             j1939.priority(),
             j1939.pgn(),
             j1939.dest(),
             j1939.source(),
-            j1939.data(),
+            {
+                let this = &j1939;
+                &this.payload
+            },
         )
         .into();
         self.bus.push(Some(packet.clone()));
@@ -66,13 +69,10 @@ impl Connection for SimulatedConnection {
     }
 }
 
-fn now() -> u32 {
-    let start = SystemTime::now();
-    let since_the_epoch = start
+fn now() -> Duration {
+    SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .expect("Time went backwards")
-        .as_millis();
-    since_the_epoch as u32
 }
 
 impl Drop for SimulatedConnection {
