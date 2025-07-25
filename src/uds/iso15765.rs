@@ -49,13 +49,15 @@ impl<'a> Iso15765<'a> {
         }
         Ok(())
     }
-    pub fn receive(mut self, iter: &mut dyn Iterator<Item = Packet>) -> Result<Option<UdsBuffer>> {
+
+    /// This assumes that all ISO15765 is synchronous.
+    pub fn receive(&mut self, iter: &mut dyn Iterator<Item = Packet>) -> Result<Option<UdsBuffer>> {
         let p = iter
             .filter(|p| p.id & 0xFFFFFF == self.receive_header)
             .next();
         if let Some(p) = p {
             if p.payload[0] & 0xF0 == 0x00 {
-                Ok(Some(p.payload[1..8].to_vec()))
+                Ok(Some(p.payload[1..(1 + p.payload[0] as usize)].to_vec()))
             } else {
                 self.transport_receive(&p)
             }
@@ -63,6 +65,13 @@ impl<'a> Iso15765<'a> {
             Err(anyhow!("No response"))
         }
     }
+
+    pub fn send_receive(&mut self, req: &UdsBuffer) -> Result<Option<UdsBuffer>> {
+        let mut iter = self.connection.iter_for(self.duration);
+        self.send(req)?;
+        self.receive(&mut iter)
+    }
+
     fn transport_send(&mut self, req: &UdsBuffer) -> Result<()> {
         // send first frame
         let size = req.len();
@@ -171,6 +180,33 @@ mod tests {
         Ok(())
     }
     #[test]
+    fn send_receive() -> Result<()> {
+        let mut connection = SimulatedConnection::new()?;
+
+        let log = connection.iter();
+        thread::spawn(move || log.filter(|p| p.is_some()).for_each(|p| eprintln!("{p:?}")));
+
+        let mut tx_connection = connection.clone();
+        let mut stream = tx_connection.iter_for(Duration::from_secs(2));
+        thread::spawn(move || {
+            let mut tp = Iso15765::new(&mut tx_connection, 0xDA00, Duration::from_secs(2), 0, 0xF9);
+            let rx = tp.receive(&mut stream).unwrap().unwrap();
+            eprintln!(" rx: {rx:?}");
+            let tx = rx.iter().map(|u| u + 3).collect();
+            eprintln!(" tx: {tx:?}");
+
+            tp.send(&tx).expect("Failed to send");
+        });
+
+        let mut tp = Iso15765::new(&mut connection, 0xDA00, Duration::from_secs(2), 0xF9, 0);
+        let buf = tp.send_receive(&[1, 2, 3].to_vec())?;
+        assert_eq!(
+            vec![0x04u8, 0x05, 0x06],
+            buf.unwrap()
+        );
+        Ok(())
+    }
+    #[test]
     fn send14() -> Result<()> {
         const DURATION: Duration = Duration::from_secs(2_000);
         let mut rx_connection = Box::new(SimulatedConnection::new()?);
@@ -183,7 +219,7 @@ mod tests {
             tx_tp.send(&[0x55; 14].to_vec()).expect("Failed to send");
         });
 
-        let rx_tp = Iso15765::new(rx_connection.as_mut(), 0xDA00, DURATION, 0, 0xF9);
+        let mut rx_tp = Iso15765::new(rx_connection.as_mut(), 0xDA00, DURATION, 0, 0xF9);
         let packet = rx_tp.receive(stream.by_ref())?;
 
         assert_eq!([0x55; 14].to_vec(), packet.unwrap());

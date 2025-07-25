@@ -136,17 +136,15 @@ impl Iso14229Command {
 
     // Err(None) means no response.
     /// Err(UdsBuffer) is the NACK
-    pub fn execute(&self, can_can: &mut CanContext) -> Result<Option<UdsBuffer>> {
-        let connection = can_can.connection.as_mut();
-        let mut result = connection.iter_for(self.duration);
+    pub fn execute(&self, context: &mut CanContext) -> Result<Option<UdsBuffer>> {
+        let connection = context.connection.as_mut();
         let mut iso15765 = Iso15765::new(
             connection,
             self.pgn,
             self.duration,
-            can_can.can_can.source_address,
-            can_can.can_can.destination_address,
+            context.can_can.source_address,
+            context.can_can.destination_address,
         );
-        iso15765.send(&self.raw)?;
-        iso15765.receive(&mut result)
+        iso15765.send_receive(&self.raw)
     }
 }
