@@ -23,14 +23,18 @@ pub struct Slcan {
     outbound: Arc<Mutex<VecDeque<String>>>,
     running: Arc<AtomicBool>,
     start: SystemTime,
+    verbose: bool,
+    port: Arc<Mutex<Box<dyn SerialPort>>>,
 }
 
 const ONE_MILLI: Duration = Duration::from_millis(1);
 
 impl Slcan {
-    pub fn new(port_name: &str, speed: u32) -> Result<Slcan> {
-        eprintln!("opening {port_name}");
-        let mut port = serialport::new(port_name, 1_000_000)
+    pub fn new(verbose: bool, port_name: &str, speed: u32) -> Result<Slcan> {
+        if verbose {
+            eprintln!("opening {port_name}");
+        }
+        let port = serialport::new(port_name, 1_000_000)
             .timeout(ONE_MILLI)
             .flow_control(serialport::FlowControl::Hardware)
             .dtr_on_open(true)
@@ -38,36 +42,40 @@ impl Slcan {
 
         port.clear(serialport::ClearBuffer::All)?;
 
-        let slcan = Slcan {
+        let mut slcan = Slcan {
             bus: PushBus::new("slcan"),
             outbound: Arc::new(Mutex::new(VecDeque::new())),
             running: Arc::new(AtomicBool::new(true)),
             start: SystemTime::now(),
+            verbose,
+            port: Arc::new(Mutex::new(port)),
         };
 
-        send_cmd(&mut port, b"C")?;
-        send_cmd(&mut port, b"C")?;
-        send_cmd(&mut port, b"V")?;
+        slcan.send_cmd(b"C")?;
+        slcan.send_cmd(b"C")?;
+        slcan.send_cmd(b"V")?;
         let speed_command = &format!("S{}", CAN_SPEEDS.binary_search(&speed).unwrap());
-        send_cmd(&mut port, speed_command.as_bytes())?;
-        send_cmd(&mut port, b"O")?;
+        slcan.send_cmd(speed_command.as_bytes())?;
+        slcan.send_cmd(b"O")?;
 
         // write outbound packets
         {
             let mut slcan = slcan.clone();
-            thread::spawn(move || slcan.run_can(port));
+            thread::spawn(move || slcan.run_can());
         }
-
-        eprintln!(" opened {port_name}");
+        if verbose {
+            eprintln!(" opened {port_name}");
+        }
         Ok(slcan)
     }
-    pub fn now(&self) -> Duration {
+
+    fn now(&self) -> Duration {
         SystemTime::now()
             .duration_since(self.start)
             .expect("Time went backwards")
     }
 
-    fn run_can(&mut self, mut port: Box<dyn SerialPort>) {
+    fn run_can(&mut self) {
         // gross
         // copy from port to buf
         // copy from buf vecdeque
@@ -77,6 +85,7 @@ impl Slcan {
         let mut buf = [0; 1024];
         let mut q = VecDeque::new();
 
+        let mut port = self.port.lock().unwrap();
         while self.running.load(std::sync::atomic::Ordering::Relaxed) {
             // tx
             {
@@ -102,7 +111,7 @@ impl Slcan {
                             if index < q.len() {
                                 let vec: Vec<u8> = q.drain(..index).collect();
                                 let line: String = String::from_utf8(vec).expect("Invalid UTF8");
-                                self.bus.push(parse_result(self.now(), line).ok());
+                                self.bus.push(self.parse_result(line).ok());
                                 q.pop_front(); // drop \r
                             } else {
                                 break;
@@ -117,14 +126,38 @@ impl Slcan {
             }
         }
     }
-}
 
-fn send_cmd(port: &mut Box<dyn SerialPort>, cmd: &[u8]) -> Result<()> {
-    eprintln!("sending cmd {}", String::from_utf8(cmd.into())?);
-    port.write_all(cmd)?;
-    port.write_all(b"\r")?;
-    port.flush()?;
-    Ok(())
+    fn send_cmd(&mut self, cmd: &[u8]) -> Result<()> {
+        if self.verbose {
+            eprintln!("sending cmd {}", String::from_utf8(cmd.into())?);
+        }
+        let mut port = self.port.lock().unwrap();
+        port.write_all(cmd)?;
+        port.write_all(b"\r")?;
+        port.flush()?;
+        Ok(())
+    }
+
+    // 0CF00A00 8 FF FF 00 FE FF FF 00 00
+    fn parse_result(&self, buf: String) -> Result<Packet> {
+        const SIZE: usize = 9;
+        let now = self.now();
+        let len = buf.len();
+        // {T}{4 * 2 digit hex bytes}{1 digit length}{2 digit hex payload}
+        if len < SIZE || len % 2 != 0 {
+            let message = format!("Invalid buf [{buf}] len:{len} {}", len % 2);
+            if self.verbose {
+                eprintln!("{message}");
+            }
+            return Err(Error::msg(message));
+        }
+        let id = u32::from_str_radix(&buf[1..SIZE], 16)?;
+        let payload: Result<Vec<u8>, _> = ((1 + SIZE)..len)
+            .step_by(2)
+            .map(|i| u8::from_str_radix(&buf[i..i + 2], 16))
+            .collect();
+        Ok(Packet::new_rx(id, &payload?, now, 0))
+    }
 }
 
 impl Drop for Slcan {
@@ -137,24 +170,6 @@ impl Drop for Slcan {
             //            thread::sleep(TIMEOUT * 2);
         }
     }
-}
-
-const SIZE: usize = 9;
-// 0CF00A00 8 FF FF 00 FE FF FF 00 00
-fn parse_result(now: Duration, buf: String) -> Result<Packet> {
-    let len = buf.len();
-    // {T}{4 * 2 digit hex bytes}{1 digit length}{2 digit hex payload}
-    if len < SIZE || len % 2 != 0 {
-        let message = format!("Invalid buf [{buf}] len:{len} {}", len % 2);
-        eprintln!("{message}");
-        return Err(Error::msg(message));
-    }
-    let id = u32::from_str_radix(&buf[1..SIZE], 16)?;
-    let payload: Result<Vec<u8>, _> = ((1 + SIZE)..len)
-        .step_by(2)
-        .map(|i| u8::from_str_radix(&buf[i..i + 2], 16))
-        .collect();
-    Ok(Packet::new_rx(id, &payload?, now, 0))
 }
 
 fn unparse(p: &Packet) -> String {
@@ -187,7 +202,7 @@ struct SclanFactory {
 
 impl ConnectionFactory for SclanFactory {
     fn create(&self) -> Result<Box<dyn Connection>> {
-        Slcan::new(self.port_info.port_name.as_str(), self.speed)
+        Slcan::new(false, self.port_info.port_name.as_str(), self.speed)
             .map(|c| Box::new(c) as Box<dyn Connection>)
     }
 

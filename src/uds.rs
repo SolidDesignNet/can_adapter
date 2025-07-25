@@ -35,36 +35,53 @@ pub enum Uds {
     #[command(name = "auth")]
     S27 {
         #[arg(value_parser=maybe_hex::<u8>)]
-        seed_id: u8,
-        #[arg(value_parser=maybe_hex::<u8>)]
-        key_id: u8,
+        id: u8,
         #[clap(value_parser=crate::hex_array)]
         key: Box<[u8]>,
     },
 }
 impl Uds {
-    pub fn execute(&self, can_can: &mut CanContext) -> Result<Option<UdsBuffer>> {
-        match self {
-            Uds::S10 { session } => Iso14229Command::build(can_can.can_can.timeout(), 0x10)
-                .u8(&[*session])
-                .execute_report(can_can),
-            Uds::S22 { did } => Iso14229Command::build(can_can.can_can.timeout(), 0x22)
+    pub fn execute(&self, context: &mut CanContext) -> Result<Option<UdsBuffer>> {
+        self.cmd(context).execute(context)
+    }
+
+    pub fn execute_and_report(&self, context: &mut CanContext) -> Result<Option<UdsBuffer>> {
+        let cmd = self.cmd(context);
+        let r = cmd.execute(context);
+        eprintln!("sent     {:X?}", cmd.raw);
+        if let Ok(Some(b)) = &r {
+            eprintln!("received {b:X?}");
+        } else {
+            eprintln!("invalid response {r:X?}");
+        };
+        r
+    }
+
+    pub fn cmd(&self, context: &mut CanContext) -> Iso14229Command {
+        let cmd = match self {
+            Uds::S10 { session } => {
+                Iso14229Command::build(context.can_can.timeout(), 0x10).u8(&[*session])
+            }
+            Uds::S22 { did } => {
+                Iso14229Command::build(context.can_can.timeout(), 0x22).u16(&[*did])
+            }
+            Uds::S2E { did, value } => Iso14229Command::build(context.can_can.timeout(), 0x2E)
                 .u16(&[*did])
-                .execute_report(can_can),
-            Uds::S2E { did, value } => todo!(),
-            Uds::S2F { did, value } => todo!(),
-            Uds::S27 {
-                seed_id,
-                key_id,
-                key,
-            } => todo!(),
-        }
+                .u8(value),
+            Uds::S2F { did, value } => Iso14229Command::build(context.can_can.timeout(), 0x2F)
+                .u16(&[*did])
+                .u8(value),
+            Uds::S27 { id, key } => Iso14229Command::build(context.can_can.timeout(), 0x27)
+                .u8(&[*id])
+                .u8(key),
+        };
+        cmd
     }
 }
 
 type UdsBuffer = Vec<u8>;
 
-struct Iso14229Command {
+pub struct Iso14229Command {
     raw: Vec<u8>,
     pgn: u32,
     duration: Duration,
@@ -80,28 +97,27 @@ impl Default for Iso14229Command {
 }
 impl Iso14229Command {
     pub fn build(duration: Duration, command: u8) -> Iso14229Command {
-        let mut new = Iso14229Command {
+        Iso14229Command {
             raw: Default::default(),
             pgn: 0xDA00,
             duration,
-        };
-        new.u8(&[command]);
-        new
+        }
+        .u8(&[command])
     }
-    pub fn u8(&mut self, data: &[u8]) -> &mut Self {
+    pub fn u8(mut self, data: &[u8]) -> Self {
         for d in data {
             self.raw.push(*d);
         }
         self
     }
-    pub fn u16(&mut self, data: &[u16]) -> &mut Self {
+    pub fn u16(mut self, data: &[u16]) -> Self {
         for d in data {
             self.raw.push((*d >> 8) as u8);
             self.raw.push(*d as u8);
         }
         self
     }
-    pub fn u24(&mut self, data: &[u32]) -> &mut Self {
+    pub fn u24(mut self, data: &[u32]) -> Self {
         for d in data {
             self.raw.push((*d >> 16) as u8);
             self.raw.push((*d >> 8) as u8);
@@ -109,7 +125,7 @@ impl Iso14229Command {
         }
         self
     }
-    pub fn u32(&mut self, data: &[u32]) -> &mut Self {
+    pub fn u32(mut self, data: &[u32]) -> Self {
         for d in data {
             self.raw.push((*d >> 24) as u8);
             self.raw.push((*d >> 16) as u8);
@@ -118,7 +134,7 @@ impl Iso14229Command {
         }
         self
     }
-    pub fn u64(&mut self, data: &[u64]) -> &mut Self {
+    pub fn u64(mut self, data: &[u64]) -> Self {
         for d in data {
             let d = *d;
             for i in (0..7).rev() {
@@ -126,12 +142,6 @@ impl Iso14229Command {
             }
         }
         self
-    }
-    pub fn execute_report(&self, can_can: &mut CanContext) -> Result<Option<UdsBuffer>> {
-        let r = self.execute(can_can);
-        eprintln!("sent     {:X?}", self.raw);
-        eprintln!("received {r:X?}");
-        r
     }
 
     // Err(None) means no response.

@@ -132,6 +132,9 @@ pub enum ConnectionDescriptor {
     },
     /// SLCAN interface
     SLCAN {
+        #[arg(long, short('v'), default_value = "false")]
+        verbose: bool,
+
         /// COM port
         port: String,
 
@@ -167,7 +170,11 @@ impl ConnectionDescriptor {
             ConnectionDescriptor::SocketCan { dev, speed } => {
                 Ok(Box::new(SocketCanConnection::new(dev, *speed)?) as Box<dyn Connection>)
             }
-            ConnectionDescriptor::SLCAN { port, speed } => Ok(Box::new(Slcan::new(port, *speed)?)),
+            ConnectionDescriptor::SLCAN {
+                verbose,
+                port,
+                speed,
+            } => Ok(Box::new(Slcan::new(*verbose, port, *speed)?)),
             #[cfg(windows)]
             ConnectionDescriptor::RP1210 {
                 id,
@@ -231,7 +238,7 @@ pub fn main() -> Result<()> {
             log(cli)?;
         }
         CanCommand::Uds { uds } => {
-            uds.execute(cli).expect("Unable to send UDS");
+            uds.execute_and_report(cli)?;
         }
         CanCommand::J1939 {
             j1939,
