@@ -1,13 +1,13 @@
 [package]
 name = "can_adapter"
-version = "0.4.2"
+version = "0.5.0"
 edition = "2021"
 license = "MIT"
 description = "Library to load CAN adapters typically used to diagnose vehicles."
 homepage = "https://github.com/SolidDesignNet/rp1210-rs"
 repository = "https://github.com/SolidDesignNet/rp1210-rs"
 readme = "README.md"
-keywords = ["rp1210", "rp1210a", "j2534", "CAN", "j1939"]
+keywords = ["rp1210", "slcan", "j2534", "CAN", "j1939"]
 
 [[bin]]
 name = "logger"
