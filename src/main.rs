@@ -8,7 +8,6 @@ use slcan::Slcan;
 
 pub mod connection;
 pub mod j1939;
-pub mod j1939_packet;
 pub mod packet;
 pub mod pushbus;
 pub mod sim;
@@ -28,7 +27,7 @@ pub mod socketcanconnection;
 #[cfg(target_os = "linux")]
 use socketcanconnection::SocketCanConnection;
 
-use crate::{j1939_packet::J1939Packet, packet::Packet};
+use crate::{ j1939::j1939_packet::J1939Packet, packet::Packet};
 
 #[derive(Parser)] // requires `derive` feature
 #[command(name = "cancan")]

@@ -3,7 +3,12 @@ use std::{collections::HashMap, time::Duration};
 use anyhow::{Context, Result};
 use clap_num::maybe_hex;
 
-use crate::{connection::Connection, j1939_packet::J1939Packet, packet::Packet, CanContext};
+pub mod j1939_packet;
+pub mod pgn;
+
+use crate::{
+    connection::Connection, j1939::j1939_packet::J1939Packet, packet::Packet, j1939::pgn::Pgn, CanContext
+};
 use clap::Parser;
 use zerocopy::*;
 
@@ -21,7 +26,7 @@ pub enum J1939 {
         pgn: u32,
     },
     AddressClaim {
-        did: u16,
+        sa: u8,
     },
 }
 #[derive(Debug)]
@@ -57,7 +62,7 @@ impl J1939 {
                 println!("{s}");
                 Ok(())
             }
-            J1939::AddressClaim { did } => todo!(),
+            J1939::AddressClaim { sa } => todo!(),
         }
     }
 
@@ -387,31 +392,12 @@ impl J1939 {
 
 #[repr(C, packed)]
 #[derive(Immutable, IntoBytes, TryFromBytes)]
-struct u24 {
-    value: [u8; 3],
-}
-
-impl From<u32> for u24 {
-    fn from(v: u32) -> Self {
-        let mut value = [0u8; 3];
-        value.copy_from_slice(&v.as_bytes()[0..3]);
-        u24 { value }
-    }
-}
-impl From<u24> for u32 {
-    fn from(v: u24) -> Self {
-        u32::from_be_bytes([0, v.value[0], v.value[1], v.value[2]])
-    }
-}
-
-#[repr(C, packed)]
-#[derive(Immutable, IntoBytes, TryFromBytes)]
 struct J1939_21TpCmRts {
     control: u8,
     size: u16,
     count: u8,
     allowed: u8,
-    pgn: u24,
+    pgn: Pgn,
 }
 #[repr(C, packed)]
 #[derive(Immutable, IntoBytes, TryFromBytes)]
@@ -420,7 +406,7 @@ struct J1939_21TpCmCts {
     count: u8,
     next: u8,
     reserved: u16,
-    pgn: u24,
+    pgn: Pgn,
 }
 #[repr(C, packed)]
 #[derive(Immutable, IntoBytes, TryFromBytes)]
@@ -429,15 +415,17 @@ struct J1939_21TpCmEOM {
     size: u16,
     count: u8,
     reserved: u8,
-    pgn: u24,
+    pgn: Pgn,
 }
 #[repr(C, packed)]
 #[derive(Immutable, IntoBytes, TryFromBytes)]
 struct J1939_21TpConnAbort {
     control: u8,
     reason: u8,
-    reserved: u24,
-    pgn: u24,
+    _reserved1: u8,
+    _reserved2: u8,
+    _reserved3: u8,
+    pgn: Pgn,
 }
 #[repr(C, packed)]
 #[derive(Immutable, IntoBytes, TryFromBytes)]
@@ -446,7 +434,7 @@ struct J1939_21TpBAM {
     size: u16,
     count: u8,
     reserved: u8,
-    pgn: u24,
+    pgn: Pgn,
 }
 
 #[cfg(test)]
@@ -468,7 +456,7 @@ mod tests {
             .map(|p| p.into());
 
         let payload: &[u8] = &[&[0, 0, 0, 1], "Something".as_bytes()].concat()[..];
-        let tx = Packet::new( 0x18D3FF00, payload).into();
+        let tx = Packet::new(0x18D3FF00, payload).into();
         thread::spawn(move || {
             let _ = J1939::send(tx_connection.as_mut(), &tx);
         });
@@ -491,7 +479,7 @@ mod tests {
             .map(|p| p.into());
 
         let payload: &[u8] = &[&[0, 0, 0, 1], "Something".as_bytes()].concat()[..];
-        let tx = J1939Packet::new( 0x18D3F903, payload);
+        let tx = J1939Packet::new(0x18D3F903, payload);
         let tx2 = tx.clone();
         thread::spawn(move || {
             let _ = J1939::send(tx_connection.as_mut(), &tx);

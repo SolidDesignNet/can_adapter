@@ -5,7 +5,7 @@ use std::thread::Builder;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::connection::{Connection, ConnectionFactory, DeviceDescriptor, ProtocolDescriptor};
-use crate::j1939_packet::J1939Packet;
+use crate::j1939::j1939_packet::J1939Packet;
 use crate::packet::*;
 use crate::pushbus::PushBus;
 
@@ -32,7 +32,7 @@ impl SimulatedConnection {
     }
 }
 
-fn run(running: Arc<AtomicBool>,  bus: PushBus<Packet>) {
+fn run(running: Arc<AtomicBool>, bus: PushBus<Packet>) {
     running.store(true, Ordering::Relaxed);
     let mut seq: u64 = u64::from_be_bytes([0, 0, 0, 0, 0, 0, 0, 0]);
     while running.load(Ordering::Relaxed) {

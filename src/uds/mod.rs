@@ -2,7 +2,7 @@ use crate::{uds::iso15765::Iso15765, CanContext};
 use anyhow::Result;
 use clap::*;
 use clap_num::maybe_hex;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 mod iso15765;
 
@@ -41,11 +41,11 @@ pub enum Uds {
     },
 }
 impl Uds {
-    pub fn execute(&self, context: &mut CanContext) -> Result<Option<UdsBuffer>> {
+    pub fn execute(&self, context: &mut CanContext) -> Result<Option<Vec<u8>>> {
         self.cmd(context).execute(context)
     }
 
-    pub fn execute_and_report(&self, context: &mut CanContext) -> Result<Option<UdsBuffer>> {
+    pub fn execute_and_report(&self, context: &mut CanContext) -> Result<Option<Vec<u8>>> {
         let cmd = self.cmd(context);
         let r = cmd.execute(context);
         eprintln!("sent     {:X?}", cmd.raw);
@@ -58,7 +58,7 @@ impl Uds {
     }
 
     pub fn cmd(&self, context: &mut CanContext) -> Iso14229Command {
-        let cmd = match self {
+        match self {
             Uds::S10 { session } => {
                 Iso14229Command::build(context.can_can.timeout(), 0x10).u8(&[*session])
             }
@@ -74,12 +74,9 @@ impl Uds {
             Uds::S27 { id, key } => Iso14229Command::build(context.can_can.timeout(), 0x27)
                 .u8(&[*id])
                 .u8(key),
-        };
-        cmd
+        }
     }
 }
-
-type UdsBuffer = Vec<u8>;
 
 pub struct Iso14229Command {
     raw: Vec<u8>,
@@ -146,7 +143,7 @@ impl Iso14229Command {
 
     // Err(None) means no response.
     /// Err(UdsBuffer) is the NACK
-    pub fn execute(&self, context: &mut CanContext) -> Result<Option<UdsBuffer>> {
+    pub fn execute(&self, context: &mut CanContext) -> Result<Option<Vec<u8>>> {
         let connection = context.connection.as_mut();
         let mut iso15765 = Iso15765::new(
             connection,
@@ -155,6 +152,7 @@ impl Iso14229Command {
             context.can_can.source_address,
             context.can_can.destination_address,
         );
+
         iso15765.send_receive(&self.raw)
     }
 }

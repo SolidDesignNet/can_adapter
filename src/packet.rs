@@ -41,19 +41,22 @@ impl Packet {
     pub fn time(&self) -> Option<Duration> {
         match self.state {
             PacketState::TX => None,
-            PacketState::RX { time,channel: _ } => Some(time),
+            PacketState::RX { time, channel: _ } => Some(time),
         }
     }
     pub fn channel(&self) -> Option<u32> {
         match self.state {
             PacketState::TX => None,
-            PacketState::RX { time:_, channel } => Some(channel),
+            PacketState::RX { time: _, channel } => Some(channel),
         }
     }
     pub fn is_tx(&self) -> bool {
         match self.state {
             PacketState::TX => true,
-            PacketState::RX { time:_, channel:_ } => false,
+            PacketState::RX {
+                time: _,
+                channel: _,
+            } => false,
         }
     }
 
@@ -80,7 +83,7 @@ impl Packet {
 
 fn as_hex(data: &[u8]) -> String {
     // FIXME optimize
-    let mut s = String::new();
+    let mut s = String::with_capacity(data.len() * 3);
     for byte in data {
         write!(&mut s, " {byte:02X}").expect("Unable to write");
     }
@@ -89,7 +92,7 @@ fn as_hex(data: &[u8]) -> String {
 
 fn as_hex_nospace(data: &[u8]) -> String {
     // FIXME optimize
-    let mut s = String::new();
+    let mut s = String::with_capacity(data.len() * 2);
     for byte in data {
         write!(&mut s, "{byte:02X}").expect("Unable to write");
     }

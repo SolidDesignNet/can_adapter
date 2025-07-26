@@ -1,14 +1,14 @@
-use std::{thread, time::Duration};
+use std::{
+    thread,
+    time::{Duration, Instant},
+};
 
 use anyhow::{anyhow, Result};
 
-use crate::{connection::Connection, packet::Packet, uds::UdsBuffer};
+use crate::{connection::Connection, packet::Packet};
 
 pub struct Iso15765<'a> {
-    connection: &'a mut dyn Connection,
-    sa: u8,
-    da: u8,
-    pgn: u32,
+    connection: &'a dyn Connection,
     send_header: u32,
     receive_header: u32,
     duration: Duration,
@@ -17,7 +17,7 @@ pub struct Iso15765<'a> {
 impl<'a> Iso15765<'a> {
     // connection should be a Box
     pub fn new(
-        connection: &'a mut dyn Connection,
+        connection: &'a dyn Connection,
         pgn: u32,
         duration: Duration,
         sa: u8,
@@ -27,15 +27,12 @@ impl<'a> Iso15765<'a> {
         let da32 = da as u32;
         Iso15765 {
             connection,
-            sa,
-            da,
-            pgn,
             duration,
             send_header: pgn << 8 | da32 << 8 | sa32,
             receive_header: pgn << 8 | sa32 << 8 | da32,
         }
     }
-    pub fn send(&mut self, req: &UdsBuffer) -> Result<()> {
+    pub fn send(&self, req: &[u8]) -> Result<()> {
         if req.len() > 8 {
             self.transport_send(req)?;
         } else {
@@ -51,11 +48,9 @@ impl<'a> Iso15765<'a> {
     }
 
     /// This assumes that all ISO15765 is synchronous.
-    pub fn receive(&mut self, iter: &mut dyn Iterator<Item = Packet>) -> Result<Option<UdsBuffer>> {
-        let p = iter
-            .filter(|p| p.id & 0xFFFFFF == self.receive_header)
-            .next();
-        if let Some(p) = p {
+    pub fn receive(&mut self, iter: &mut impl Iterator<Item = Packet>) -> Result<Option<Vec<u8>>> {
+        let p = iter.find(|p| p.id & 0xFFFFFF == self.receive_header);
+        let r = if let Some(p) = p {
             if p.payload[0] & 0xF0 == 0x00 {
                 Ok(Some(p.payload[1..(1 + p.payload[0] as usize)].to_vec()))
             } else {
@@ -63,16 +58,17 @@ impl<'a> Iso15765<'a> {
             }
         } else {
             Err(anyhow!("No response"))
-        }
+        };
+        r
     }
 
-    pub fn send_receive(&mut self, req: &UdsBuffer) -> Result<Option<UdsBuffer>> {
+    pub fn send_receive(&mut self, req: &[u8]) -> Result<Option<Vec<u8>>> {
         let mut iter = self.connection.iter_for(self.duration);
         self.send(req)?;
         self.receive(&mut iter)
     }
 
-    fn transport_send(&mut self, req: &UdsBuffer) -> Result<()> {
+    fn transport_send(&self, req: &[u8]) -> Result<()> {
         // send first frame
         let size = req.len();
         let payload = [&[0x10 | (0xF & (size >> 8) as u8), size as u8], &req[0..6]].concat();
@@ -145,7 +141,7 @@ impl<'a> Iso15765<'a> {
         result.extend(packet.payload[2..].iter());
 
         let len = (0xf & packet.payload[0] as u32) << 8 | (packet.payload[1] as u32);
-        let frames = 1 + (len - 6) / 7;
+        let frames = (len - 6) / 7;
         stream
             .filter(|p| p.id & 0xFFFFFF == self.receive_header)
             // exit as soon as we have all the frames
@@ -159,6 +155,8 @@ impl<'a> Iso15765<'a> {
 
 #[cfg(test)]
 mod tests {
+    use std::{default, string};
+
     use anyhow::Ok;
 
     use crate::sim::SimulatedConnection;
@@ -166,10 +164,10 @@ mod tests {
     use super::*;
     #[test]
     fn send8() -> Result<()> {
-        let mut connection = SimulatedConnection::new()?;
+        let connection = SimulatedConnection::new()?;
         let mut stream = connection.iter_for(Duration::from_secs(2));
-        let mut tp = Iso15765::new(&mut connection, 0xDA00, Duration::from_secs(2), 0xF9, 0);
-        tp.send(&[1, 2, 3].to_vec())?;
+        let tp = Iso15765::new(&connection, 0xDA00, Duration::from_secs(2), 0xF9, 0);
+        tp.send(&[1, 2, 3])?;
         let packet = stream.find(|p| p.id == 0x18DA00F9).unwrap();
         eprintln!("packet {packet:X?}",);
         assert_eq!(0x18DA00F9, packet.id);
@@ -181,29 +179,26 @@ mod tests {
     }
     #[test]
     fn send_receive() -> Result<()> {
-        let mut connection = SimulatedConnection::new()?;
+        let connection = SimulatedConnection::new()?;
 
         let log = connection.iter();
         thread::spawn(move || log.filter(|p| p.is_some()).for_each(|p| eprintln!("{p:?}")));
 
-        let mut tx_connection = connection.clone();
+        let tx_connection = connection.clone();
         let mut stream = tx_connection.iter_for(Duration::from_secs(2));
         thread::spawn(move || {
-            let mut tp = Iso15765::new(&mut tx_connection, 0xDA00, Duration::from_secs(2), 0, 0xF9);
+            let mut tp = Iso15765::new(&tx_connection, 0xDA00, Duration::from_secs(2), 0, 0xF9);
             let rx = tp.receive(&mut stream).unwrap().unwrap();
             eprintln!(" rx: {rx:?}");
-            let tx = rx.iter().map(|u| u + 3).collect();
+            let tx = rx.iter().map(|u| u + 3).collect::<Vec<u8>>();
             eprintln!(" tx: {tx:?}");
 
             tp.send(&tx).expect("Failed to send");
         });
 
-        let mut tp = Iso15765::new(&mut connection, 0xDA00, Duration::from_secs(2), 0xF9, 0);
-        let buf = tp.send_receive(&[1, 2, 3].to_vec())?;
-        assert_eq!(
-            vec![0x04u8, 0x05, 0x06],
-            buf.unwrap()
-        );
+        let mut tp = Iso15765::new(&connection, 0xDA00, Duration::from_secs(2), 0xF9, 0);
+        let buf = tp.send_receive(&[1, 2, 3])?;
+        assert_eq!(vec![0x04u8, 0x05, 0x06], buf.unwrap());
         Ok(())
     }
     #[test]
@@ -216,13 +211,62 @@ mod tests {
 
         thread::spawn(move || {
             let mut tx_tp = Iso15765::new(tx_connection.as_mut(), 0xDA00, DURATION, 0xF9, 0);
-            tx_tp.send(&[0x55; 14].to_vec()).expect("Failed to send");
+            tx_tp.send(&[0x55; 14]).expect("Failed to send");
         });
 
         let mut rx_tp = Iso15765::new(rx_connection.as_mut(), 0xDA00, DURATION, 0, 0xF9);
         let packet = rx_tp.receive(stream.by_ref())?;
 
-        assert_eq!([0x55; 14].to_vec(), packet.unwrap());
+        assert_eq!([0x55; 14][..], packet.unwrap());
+        Ok(())
+    }
+
+    struct SimVin {
+        vin: String,
+    }
+    impl SimVin {
+        pub fn run(&self, connection: &mut dyn Connection) {
+            let iso15765 = Iso15765::new(connection, 0xDA00, Duration::from_secs(2), 0x03, 0xF9);
+            let mut iter = connection.iter().flatten();
+            Iso15765::new(connection, 0xDA00, Duration::from_secs(2), 0x2, 0xF9)
+                .receive(&mut iter)
+                .iter()
+                .flatten()
+                .cloned()
+                .for_each(|buf| match buf[0] {
+                    0x22 => {
+                        let resp = if buf[1..2] == [0xf1, 0x90] {
+                            &[&[0x62], self.vin.as_bytes()].concat()
+                        } else {
+                            &[0x7F, 0x22, 0x20][..]
+                        };
+                        iso15765.send(resp);
+                    }
+                    default => (),
+                });
+        }
+    }
+    #[test]
+    fn example() -> Result<()> {
+        const DURATION: Duration = Duration::from_secs(2_000);
+        let rx_connection = Box::new(SimulatedConnection::new()?);
+        let tx_connection = rx_connection.clone();
+
+        let mut stream = rx_connection.iter_for(DURATION);
+
+        thread::spawn(move || {
+            let tx_tp = Iso15765::new(tx_connection.as_ref(), 0xDA00, DURATION, 0xF9, 0);
+            tx_tp.send(&[0x55; 14]).expect("Failed to send");
+        });
+
+        // read VIN
+
+        // session 3
+        // auth
+        // write VIN
+        // reset
+
+        // read VIN again
         Ok(())
     }
 }
