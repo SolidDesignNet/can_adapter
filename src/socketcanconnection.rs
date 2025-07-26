@@ -1,30 +1,24 @@
-use anyhow::Context;
-use anyhow::Result;
+use anyhow::{Context, Result};
 use color_print::cformat;
-use socketcan::enumerate;
-use socketcan::CanFrame;
-use socketcan::Frame;
-use socketcan::Socket;
+use socketcan::{enumerate, CanFrame, Frame, Socket};
 
-use socketcan::CanSocket;
-use socketcan::SocketOptions;
-use std::io::Write;
-use std::option::Option;
-use std::sync::atomic::AtomicBool;
-use std::sync::atomic::Ordering;
-use std::sync::Arc;
-use std::sync::Mutex;
-use std::thread;
-use std::time::Duration;
-use std::time::Instant;
-use std::time::SystemTime;
+use socketcan::{CanSocket, SocketOptions};
+use std::{
+    io::Write,
+    option::Option,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex,
+    },
+    thread,
+    time::{Duration, SystemTime},
+};
 
-use crate::connection::Connection;
-use crate::connection::ConnectionFactory;
-use crate::connection::DeviceDescriptor;
-use crate::connection::ProtocolDescriptor;
-use crate::packet::Packet;
-use crate::pushbus::PushBus;
+use crate::{
+    connection::{Connection, ConnectionFactory, DeviceDescriptor, ProtocolDescriptor},
+    packet::Packet,
+    pushbus::PushBus,
+};
 
 /// ```sh
 ///   ip link set can0 up
