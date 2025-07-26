@@ -36,7 +36,7 @@ impl<'a> Iso15765<'a> {
         if req.len() > 8 {
             self.transport_send(req)?;
         } else {
-            let mut payload = [&[req.len() as u8][..], &req[..]].concat();
+            let mut payload = [&[req.len() as u8], req].concat();
             // pad out to 8 bytes
             while payload.len() < 8 {
                 payload.push(0xFF);
@@ -71,7 +71,7 @@ impl<'a> Iso15765<'a> {
     fn transport_send(&self, req: &[u8]) -> Result<()> {
         // send first frame
         let size = req.len();
-        let payload = [&[0x10 | (0xF & (size >> 8) as u8), size as u8], &req[0..6]].concat();
+        let payload = [&(0x1000 | (size as u16)).to_be_bytes(), &req[0..6]].concat();
         let first_frame = Packet::new(self.send_header, &payload);
         let mut flow_control_stream = self.connection.iter_for(Duration::from_secs(2));
         self.connection.send(&first_frame)?;
@@ -140,8 +140,11 @@ impl<'a> Iso15765<'a> {
         let mut result = Vec::new();
         result.extend(packet.payload[2..].iter());
 
-        let len = (0xf & packet.payload[0] as u32) << 8 | (packet.payload[1] as u32);
-        let frames = (len - 6) / 7;
+        let bytes: [u8; 2] = packet.payload[0..2]
+            .try_into()
+            .expect("Failed to parse length.");
+        let len = u16::from_be_bytes(bytes) & 0x0FFF;
+        let frames = len / 7;
         stream
             .filter(|p| p.id & 0xFFFFFF == self.receive_header)
             // exit as soon as we have all the frames
@@ -203,21 +206,40 @@ mod tests {
     }
     #[test]
     fn send14() -> Result<()> {
-        const DURATION: Duration = Duration::from_secs(2_000);
-        let mut rx_connection = Box::new(SimulatedConnection::new()?);
-        let mut tx_connection = rx_connection.clone();
+        const DURATION: Duration = Duration::from_secs(2);
+        let rx_connection = Box::new(SimulatedConnection::new()?);
+        let tx_connection = rx_connection.clone();
 
         let mut stream = rx_connection.iter_for(DURATION);
 
         thread::spawn(move || {
-            let mut tx_tp = Iso15765::new(tx_connection.as_mut(), 0xDA00, DURATION, 0xF9, 0);
+            let tx_tp = Iso15765::new(tx_connection.as_ref(), 0xDA00, DURATION, 0xF9, 0);
             tx_tp.send(&[0x55; 14]).expect("Failed to send");
         });
 
-        let mut rx_tp = Iso15765::new(rx_connection.as_mut(), 0xDA00, DURATION, 0, 0xF9);
-        let packet = rx_tp.receive(stream.by_ref())?;
+        let mut rx_tp = Iso15765::new(rx_connection.as_ref(), 0xDA00, DURATION, 0, 0xF9);
+        let packet = rx_tp.receive(&mut stream)?;
 
         assert_eq!([0x55; 14][..], packet.unwrap());
+        Ok(())
+    }
+    #[test]
+    fn send4000() -> Result<()> {
+        const DURATION: Duration = Duration::from_secs(2);
+        let rx_connection = Box::new(SimulatedConnection::new()?);
+        let tx_connection = rx_connection.clone();
+
+        let mut stream = rx_connection.iter_for(DURATION);
+
+        thread::spawn(move || {
+            let tx_tp = Iso15765::new(tx_connection.as_ref(), 0xDA00, DURATION, 0xF9, 0);
+            tx_tp.send(&[0x55; 4000]).expect("Failed to send");
+        });
+
+        let mut rx_tp = Iso15765::new(rx_connection.as_ref(), 0xDA00, DURATION, 0, 0xF9);
+        let packet = rx_tp.receive(&mut stream)?.unwrap();
+        assert_eq!(4000, packet.len());
+        assert_eq!([0x55; 4000][..], packet);
         Ok(())
     }
 
@@ -248,7 +270,7 @@ mod tests {
     }
     #[test]
     fn example() -> Result<()> {
-        const DURATION: Duration = Duration::from_secs(2_000);
+        const DURATION: Duration = Duration::from_secs(2);
         let rx_connection = Box::new(SimulatedConnection::new()?);
         let tx_connection = rx_connection.clone();
 
