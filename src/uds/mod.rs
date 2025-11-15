@@ -2,7 +2,7 @@ use crate::{uds::iso15765::Iso15765, CanContext};
 use anyhow::Result;
 use clap::*;
 use clap_num::maybe_hex;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 mod iso15765;
 
@@ -145,7 +145,7 @@ impl Iso14229Command {
     /// Err(UdsBuffer) is the NACK
     pub fn execute(&self, context: &mut CanContext) -> Result<Option<Vec<u8>>> {
         let connection = context.connection.as_mut();
-        let mut iso15765 = Iso15765::new(
+        let iso15765 = Iso15765::new(
             connection,
             self.pgn,
             self.duration,

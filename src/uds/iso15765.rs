@@ -185,7 +185,7 @@ mod tests {
         let tx_connection = connection.clone();
         let mut stream = tx_connection.iter_for(Duration::from_secs(2));
         thread::spawn(move || {
-            let mut tp = Iso15765::new(&tx_connection, 0xDA00, Duration::from_secs(2), 0, 0xF9);
+            let tp = Iso15765::new(&tx_connection, 0xDA00, Duration::from_secs(2), 0, 0xF9);
             let rx = tp.receive(&mut stream).unwrap().unwrap();
             eprintln!(" rx: {rx:?}");
             let tx = rx.iter().map(|u| u + 3).collect::<Vec<u8>>();
@@ -194,7 +194,7 @@ mod tests {
             tp.send(&tx).expect("Failed to send");
         });
 
-        let mut tp = Iso15765::new(&connection, 0xDA00, Duration::from_secs(2), 0xF9, 0);
+        let tp = Iso15765::new(&connection, 0xDA00, Duration::from_secs(2), 0xF9, 0);
         let buf = tp.send_receive(&[1, 2, 3])?;
         assert_eq!(vec![0x04u8, 0x05, 0x06], buf.unwrap());
         Ok(())
@@ -212,7 +212,7 @@ mod tests {
             tx_tp.send(&[0x55; 14]).expect("Failed to send");
         });
 
-        let mut rx_tp = Iso15765::new(&rx_connection, 0xDA00, DURATION, 0, 0xF9);
+        let rx_tp = Iso15765::new(&rx_connection, 0xDA00, DURATION, 0, 0xF9);
         let packet = rx_tp.receive(&mut stream)?;
 
         assert_eq!([0x55; 14][..], packet.unwrap());

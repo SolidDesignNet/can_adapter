@@ -67,7 +67,7 @@ impl J1939 {
     }
 
     pub fn request(
-        connection: &(dyn Connection),
+        connection: &dyn Connection ,
         duration: Duration,
         transport_protocol: bool,
         sa: u8,
@@ -94,7 +94,7 @@ impl J1939 {
         };
         Ok(packet)
     }
-    pub fn send(connection: &mut (dyn Connection), packet: &J1939Packet) -> Result<()> {
+    pub fn send(connection: &mut dyn Connection , packet: &J1939Packet) -> Result<()> {
         if packet.len() > 8 {
             J1939::send_tp(connection, packet)
         } else {
@@ -103,14 +103,14 @@ impl J1939 {
         }
     }
 
-    fn send_tp(connection: &mut (dyn Connection), packet: &J1939Packet) -> Result<()> {
+    fn send_tp(connection: &mut dyn Connection , packet: &J1939Packet) -> Result<()> {
         if packet.dest() == 0xFF {
             J1939::send_tp_bam(connection, packet)
         } else {
             J1939::send_tp_ds(connection, packet)
         }
     }
-    fn send_tp_bam(connection: &mut (dyn Connection), packet: &J1939Packet) -> Result<()> {
+    fn send_tp_bam(connection: &mut dyn Connection , packet: &J1939Packet) -> Result<()> {
         let pgn = packet.pgn();
         let size = packet.len();
         let count = (1 + size / 7) as u8;
@@ -136,7 +136,7 @@ impl J1939 {
         }
         Ok(())
     }
-    fn send_tp_ds(connection: &mut (dyn Connection), packet: &J1939Packet) -> Result<()> {
+    fn send_tp_ds(connection: &mut dyn Connection , packet: &J1939Packet) -> Result<()> {
         let rx_id = 0xEC0000 | (packet.source() as u32) << 8 | (packet.dest() as u32);
 
         let pgn = packet.pgn();

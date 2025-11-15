@@ -159,7 +159,7 @@ pub enum ConnectionDescriptor {
 }
 
 impl ConnectionDescriptor {
-    pub fn connect(&self) -> Result<Box<dyn Connection>> {
+    pub fn connect(&self, can_can:&CanCan) -> Result<Box<dyn Connection>> {
         let connection = self;
         match &connection {
             ConnectionDescriptor::List {} => list_all(),
@@ -187,7 +187,7 @@ impl ConnectionDescriptor {
                     let mut ap = rp1210::APP_PACKETIZATION.write().unwrap();
                     *ap = *app_packetize;
                 }
-                Ok(Box::new(Rp1210::new(id, *device, self.source_address)?) as Box<dyn Connection>)
+                Ok(Box::new(Rp1210::new(id, *device, can_can.source_address)?) as Box<dyn Connection>)
             }
         }
     }
@@ -211,7 +211,7 @@ pub fn main() -> Result<()> {
 
     let connection =
         ConnectionDescriptor::parse_from(std::iter::once("").chain(can_can.connection.split(" ")))
-            .connect()?;
+            .connect(&can_can)?;
 
     let cli = &mut CanContext {
         can_can,

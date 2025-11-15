@@ -3,11 +3,9 @@ use std::{
     sync::{Arc, LazyLock, RwLock},
 };
 
-use crate::connection::Connection;
-use crate::connection::DeviceDescriptor;
-use crate::connection::ProtocolDescriptor;
+use crate::connection::ConnectionFactory;
 use crate::packet::*;
-use crate::{bus::*, connection::ConnectionFactory};
+use crate::{connection::*, j1939::j1939_packet::*, pushbus::*};
 use anyhow::*;
 use libloading::os::windows::Symbol as WinSymbol;
 use libloading::*;
@@ -29,7 +27,7 @@ type ClientDisconnectType = unsafe extern "stdcall" fn(i16) -> i16;
 
 pub struct Rp1210 {
     api: API,
-    bus: PushBus<J1939Packet>,
+    bus: PushBus<Packet>,
     running: Arc<AtomicBool>,
 }
 #[derive(Debug)]
@@ -121,7 +119,8 @@ impl API {
         Ok(())
     }
 
-    fn send(&self, packet: &J1939Packet) -> Result<i16> {
+    fn send(&self, packet: &Packet) -> Result<i16> {
+        let packet: J1939Packet = packet.into();
         let id = packet.pgn();
         let pgn = id.to_le_bytes();
         let buf = [
@@ -149,44 +148,36 @@ impl Drop for Rp1210 {
 #[allow(dead_code)]
 impl Rp1210 {
     pub fn new(id: &str, device: i16, address: u8) -> Result<Rp1210> {
-        eprintln!("new rp1210 {id} {device}");
         let time_stamp_weight = time_stamp_weight(id)?;
 
-        eprintln!("new rp1210 api");
         let mut api = API::new(id)?;
         let read = *api.read_fn;
         let get_error_fn = *api.get_error_fn;
 
         // there may be
-        eprintln!("new rp1210 connect ");
         api.client_connect(device, address)?;
 
         let id = api.id;
 
-        eprintln!("new rp1210 alloc");
-
         let running = Arc::new(AtomicBool::new(true));
-        let mut bus = PushBus::new();
+        let mut bus = PushBus::new("rp1210");
         let rp1210 = Rp1210 {
             api,
             bus: bus.clone(),
             running: running.clone(),
         };
 
-        eprintln!("new rp1210 spawn");
         std::thread::spawn(move || {
-            eprintln!("new rp1210 run");
             let mut buf: [u8; PACKET_SIZE] = [0; PACKET_SIZE];
             let channel = 0; // FIXME channel.unwrap_or(0);
             while running.load(Relaxed) {
-                eprintln!("new rp1210 loop");
                 let size = unsafe { read(id, buf.as_mut_ptr(), PACKET_SIZE as i16, 0) };
-                eprintln!("size: {size}");
                 if size > 0 {
                     let data = &buf[0..size as usize];
                     let time = u32::from_be_bytes(
                         data[0..4].try_into().expect("unable to decode timestamp"),
                     );
+                    let time = Duration::from_secs_f64(time as f64 * time_stamp_weight);
                     let echoed = data[4];
                     let payload = &data[11..(data.len())];
                     let priority = data[8] & 0x07;
@@ -203,8 +194,8 @@ impl Rp1210 {
                         da,
                         sa,
                         payload,
-                    );
-                    eprintln!("  packet: {p}");
+                    )
+                    .into();
                     bus.push(Some(p));
                 } else {
                     if size < 0 {
@@ -212,7 +203,8 @@ impl Rp1210 {
                         let code = -size;
                         let size = unsafe { (get_error_fn)(code, buf.as_mut_ptr()) } as usize;
                         let msg = String::from_utf8_lossy(&buf[0..size]).to_string();
-                        let driver = format!("{} {} {}", id, device, CONNECTION_STRING.read().unwrap());
+                        let driver =
+                            format!("{} {} {}", id, device, CONNECTION_STRING.read().unwrap());
                         eprintln!("ERROR: {}: {}: {}", driver, code, msg,);
                         std::thread::sleep(Duration::from_millis(250));
                     } else {
@@ -228,19 +220,22 @@ impl Rp1210 {
 
 impl Connection for Rp1210 {
     /// Send packet and return packet echoed back from adapter
-    fn send(&mut self, packet: &J1939Packet) -> Result<J1939Packet> {
-        let stream = self.bus.iter_for(Duration::from_millis(50));
+    fn send(&self, packet: &Packet) -> Result<Packet> {
+        let stream = self.bus.iter(); //_for();
         let sent = self.api.send(packet);
         // FIXME needs better error handling
+        const DURATION: Duration = Duration::from_millis(50);
+        let start = Instant::now();
         sent.map(|_| {
             stream
+                .take_while(|_| Instant::now().duration_since(start) < DURATION)
                 .flat_map(|o| o)
-                .find(move |p| p.header() == packet.header() && p.data() == packet.data())
+                .find(move |p| p.id == packet.id && p.payload == packet.payload)
                 .expect("Echo failed.")
         })
     }
 
-    fn iter(&self) -> Box<dyn Iterator<Item = Option<J1939Packet>> + Send + Sync> {
+    fn iter(&self) -> Box<dyn Iterator<Item = Option<Packet>> + Send + Sync> {
         self.bus.iter()
     }
 }
@@ -276,7 +271,7 @@ impl Display for Rp1210Factory {
 }
 impl ConnectionFactory for Rp1210Factory {
     // FIXME should be impl From<Rp1210Factory> for Rp1210
-    fn new(&self) -> Result<Box<dyn crate::connection::Connection>, anyhow::Error> {
+    fn create(&self) -> Result<Box<dyn crate::connection::Connection>, anyhow::Error> {
         Ok(Box::new(Rp1210::new(&self.id, self.device, self.address)?) as Box<dyn Connection>)
     }
 

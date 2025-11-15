@@ -144,7 +144,7 @@ impl Slcan {
         let now = self.now();
         let len = buf.len();
         // {T}{4 * 2 digit hex bytes}{1 digit length}{2 digit hex payload}
-        if len < SIZE || len % 2 != 0 {
+        if len < SIZE || !len.is_multiple_of(2) {
             let message = format!("Invalid buf [{buf}] len:{len} {}", len % 2);
             if self.verbose {
                 eprintln!("{message}");

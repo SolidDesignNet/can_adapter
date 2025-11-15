@@ -63,8 +63,7 @@ impl SocketCanConnection {
         self.running.store(true, Ordering::Relaxed);
         while self.running.load(Ordering::Relaxed) {
             let read_raw_frame = self.socket.lock().unwrap().read_raw_frame();
-            let p = if read_raw_frame.is_ok() {
-                let frame = read_raw_frame.unwrap();
+            let p = if let Ok(frame) = read_raw_frame {
                 let len = frame.can_dlc as usize;
                 if 0xFFFF & (frame.can_id >> 8) == 0xFEEC {
                     eprintln!("{:X} {:X?}", frame.can_id, frame.data)
