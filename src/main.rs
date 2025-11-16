@@ -159,7 +159,7 @@ pub enum ConnectionDescriptor {
 }
 
 impl ConnectionDescriptor {
-    pub fn connect(&self, can_can:&CanCan) -> Result<Box<dyn Connection>> {
+    pub fn connect(&self, source_address:u8) -> Result<Box<dyn Connection>> {
         let connection = self;
         match &connection {
             ConnectionDescriptor::List {} => list_all(),
@@ -211,7 +211,7 @@ pub fn main() -> Result<()> {
 
     let connection =
         ConnectionDescriptor::parse_from(std::iter::once("").chain(can_can.connection.split(" ")))
-            .connect(&can_can)?;
+            .connect(can_can.source_address)?;
 
     let cli = &mut CanContext {
         can_can,
