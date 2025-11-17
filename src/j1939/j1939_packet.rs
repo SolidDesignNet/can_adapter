@@ -138,5 +138,9 @@ mod tests {
             "      0.0000 0 18FFAAFB [8] FF 00 FF 00 FF 00 FF 00 (TX)",
             Packet::new(0x18FFAAFB, &[0xFF, 00, 0xFF, 00, 0xFF, 00, 0xFF, 00]).to_string()
         );
+        assert_eq!(
+            "      0.0000 0 0CFFAAFB [8] FF 00 FF 00 FF 00 FF 00 (TX)",
+            Packet::new(0x0CFFAAFB, &[0xFF, 00, 0xFF, 00, 0xFF, 00, 0xFF, 00]).to_string()
+        );
     }
 }

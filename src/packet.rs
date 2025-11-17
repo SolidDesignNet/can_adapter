@@ -18,7 +18,7 @@ impl Display for Packet {
     fn fmt(&self, f: &mut Formatter) -> Result {
         write!(
             f,
-            "{:12.4} {} {:X} [{}] {}{}",
+            "{:12.4} {} {:08X} [{}] {}{}",
             self.time().map(|d| d.as_secs_f64()).unwrap_or_default(),
             self.channel().unwrap_or_default(),
             self.id,
