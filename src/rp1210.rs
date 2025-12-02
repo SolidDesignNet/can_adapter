@@ -21,7 +21,10 @@ type ClientConnectType = unsafe extern "stdcall" fn(i32, i16, *const char, i32, 
 type SendType = unsafe extern "stdcall" fn(i16, *const u8, i16, i16, i16) -> i16;
 type ReadType = unsafe extern "stdcall" fn(i16, *const u8, i16, i16) -> i16;
 type CommandType = unsafe extern "stdcall" fn(u16, i16, *const u8, u16) -> i16;
-type _VERSION = unsafe extern "stdcall" fn(i16, *const u8, i16, i16) -> i16;
+type VersionType =
+    unsafe extern "stdcall" fn(*const char, *const char, *const char, *const char) -> i16;
+type ReadDetailedVersionType =
+    unsafe extern "stdcall" fn(i16, *const char, *const char, *const char) -> i16;
 type GetErrorType = unsafe extern "stdcall" fn(i16, *const u8) -> i16;
 type ClientDisconnectType = unsafe extern "stdcall" fn(i16) -> i16;
 
@@ -41,6 +44,8 @@ struct API {
     send_command_fn: WinSymbol<CommandType>,
     get_error_fn: WinSymbol<GetErrorType>,
     disconnect_fn: WinSymbol<ClientDisconnectType>,
+    version_fn: WinSymbol<VersionType>,
+    read_detailed_version_fn: WinSymbol<ReadDetailedVersionType>,
 }
 impl Drop for API {
     fn drop(&mut self) {
@@ -59,6 +64,9 @@ impl API {
             let get_error: Symbol<GetErrorType> = lib.get(b"RP1210_GetErrorMsg\0").unwrap();
             let disconnect: Symbol<ClientDisconnectType> =
                 lib.get(b"RP1210_ClientDisconnect\0").unwrap();
+            let version: Symbol<VersionType> = lib.get(b"RP1210_ReadVersion\0").unwrap();
+            let detailed_version: Symbol<ReadDetailedVersionType> =
+                lib.get(b"RP1210_ReadDetailedVersion\0").unwrap();
             API {
                 id: 0,
                 client_connect_fn: client_connect.into_raw(),
@@ -67,6 +75,8 @@ impl API {
                 send_command_fn: send_command.into_raw(),
                 get_error_fn: get_error.into_raw(),
                 disconnect_fn: disconnect.into_raw(),
+                version_fn: version.into_raw(),
+                read_detailed_version_fn: detailed_version.into_raw(),
                 _lib: lib,
             }
         })
@@ -166,6 +176,12 @@ impl Rp1210 {
             bus: bus.clone(),
             running: running.clone(),
         };
+        eprintln!(
+            "RP1210 connected: {} device {} address {:02X}",
+            id, device, address,
+        );
+        eprintln!("RP1210 version: {}", rp1210.version()?);
+        eprintln!("RP1210 detailed: {}", rp1210.detailed_version()?);
 
         std::thread::spawn(move || {
             let mut buf: [u8; PACKET_SIZE] = [0; PACKET_SIZE];
@@ -215,6 +231,46 @@ impl Rp1210 {
             }
         });
         Ok(rp1210)
+    }
+    fn detailed_version(&self) -> Result<String> {
+        let mut buf1: [u8; 256] = [0; 256];
+        let mut buf2: [u8; 256] = [0; 256];
+        let mut buf3: [u8; 256] = [0; 256];
+        unsafe {
+            (self.api.read_detailed_version_fn)(
+                self.api.id,
+                buf1.as_mut_ptr() as *const char,
+                buf2.as_mut_ptr() as *const char,
+                buf3.as_mut_ptr() as *const char,
+            )
+        };
+        Ok(format!(
+            "{} {} {}",
+            String::from_utf8_lossy(&buf1),
+            String::from_utf8_lossy(&buf2),
+            String::from_utf8_lossy(&buf3)
+        ))
+    }
+    fn version(&self) -> Result<String> {
+        let mut buf1: [u8; 256] = [0; 256];
+        let mut buf2: [u8; 256] = [0; 256];
+        let mut buf3: [u8; 256] = [0; 256];
+        let mut buf4: [u8; 256] = [0; 256];
+        unsafe {
+            (self.api.version_fn)(
+                buf1.as_mut_ptr() as *const char,
+                buf2.as_mut_ptr() as *const char,
+                buf3.as_mut_ptr() as *const char,
+                buf4.as_mut_ptr() as *const char,
+            )
+        };
+        Ok(format!(
+            "{} {} {} {}",
+            String::from_utf8_lossy(&buf1),
+            String::from_utf8_lossy(&buf2),
+            String::from_utf8_lossy(&buf3),
+            String::from_utf8_lossy(&buf4)
+        ))
     }
 }
 

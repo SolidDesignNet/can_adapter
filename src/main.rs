@@ -187,7 +187,7 @@ impl ConnectionDescriptor {
                     let mut ap = rp1210::APP_PACKETIZATION.write().unwrap();
                     *ap = *app_packetize;
                 }
-                Ok(Box::new(Rp1210::new(id, *device, can_can.source_address)?) as Box<dyn Connection>)
+                Ok(Box::new(Rp1210::new(id, *device, source_address)?) as Box<dyn Connection>)
             }
         }
     }
