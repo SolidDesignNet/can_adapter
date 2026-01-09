@@ -62,7 +62,7 @@ impl<T> Iterator for PushBusIter<T> {
             return v;
         }
         // this means there was an empty response from poll()
-        // sleep to avoid busy spinning
+        // sleep to avoid busy spinning, but don't sleep the first time
         if self.sleep {
             thread::sleep(SLEEP_DURATION);
         }
@@ -88,9 +88,9 @@ impl<T: Send + Sync + 'static + Clone> PushBus<T> {
         iters.retain(|i| i.running.load(std::sync::atomic::Ordering::Relaxed));
         iters.iter_mut().for_each(|i| {
             let mut items = i.data.lock().unwrap();
-            let name = self.name.as_str();
             let len = items.len();
             if len > 10_000 {
+                let name = self.name.as_str();
                 eprintln!("{name} pushbus too deep: {len}");
             }
             items.push_back(item.clone())

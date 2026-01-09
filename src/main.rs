@@ -27,8 +27,10 @@ pub mod socketcanconnection;
 #[cfg(target_os = "linux")]
 use socketcanconnection::SocketCanConnection;
 
-use crate::{ j1939::j1939_packet::J1939Packet, packet::Packet};
+use crate::{j1939::j1939_packet::J1939Packet, packet::Packet};
 
+/// Simple CAN tool for sending and receiving CAN packets over various adapters.
+/// This struct
 #[derive(Parser)] // requires `derive` feature
 #[command(name = "cancan")]
 #[command(version,about = "CAN tool", long_about = None)]
@@ -63,11 +65,14 @@ impl CanCan {
         Duration::from_millis(self.timeout)
     }
 }
+
+/// Context for CAN operations. Used to pass around the CAN connection and options.
 pub struct CanContext {
     pub can_can: CanCan,
     pub connection: Box<dyn Connection>,
 }
 
+/// Subcommands for CAN operations.
 #[derive(Subcommand, Debug, Clone)]
 enum CanCommand {
     /// Dump Vector ASC compatible log to stdout.
@@ -110,6 +115,7 @@ fn hex_array(arg: &str) -> Result<Box<[u8]>, std::num::ParseIntError> {
     //Ok(Box::new([0, 0, 0]))
 }
 
+/// Describes a connection to a CAN bus. Is used by client applications to connect to a CAN bus.
 #[derive(Parser, Debug, Clone)]
 pub enum ConnectionDescriptor {
     /// List avaliable adapters
@@ -129,7 +135,7 @@ pub enum ConnectionDescriptor {
         #[arg(long, short('s'), default_value = "500000")]
         speed: u64,
     },
-    /// SLCAN interface
+    /// SLCAN interface.
     SLCAN {
         #[arg(long, short('v'), default_value = "false")]
         verbose: bool,
@@ -155,11 +161,16 @@ pub enum ConnectionDescriptor {
 
         #[arg(long, default_value = "false")]
         app_packetize: bool,
+
+        #[arg(long, short('a'), default_value = "0xF9",value_parser=maybe_hex::<u8>)]
+        address: u8,
     },
 }
 
+/// Entry point for connecting to a CAN bus based on the ConnectionDescriptor.
 impl ConnectionDescriptor {
-    pub fn connect(&self, source_address:u8) -> Result<Box<dyn Connection>> {
+    /// The call
+    pub fn connect(&self) -> Result<Box<dyn Connection>> {
         let connection = self;
         match &connection {
             ConnectionDescriptor::List {} => list_all(),
@@ -180,6 +191,7 @@ impl ConnectionDescriptor {
                 device,
                 connection_string,
                 app_packetize,
+                address: source_address,
             } => {
                 {
                     let mut cs = rp1210::CONNECTION_STRING.write().unwrap();
@@ -187,12 +199,13 @@ impl ConnectionDescriptor {
                     let mut ap = rp1210::APP_PACKETIZATION.write().unwrap();
                     *ap = *app_packetize;
                 }
-                Ok(Box::new(Rp1210::new(id, *device, source_address)?) as Box<dyn Connection>)
+                Ok(Box::new(Rp1210::new(id, *device, *source_address)?) as Box<dyn Connection>)
             }
         }
     }
 }
 
+/// List all available connection types and exit.
 pub fn list_all() -> ! {
     for pd in connection::enumerate_connections().unwrap() {
         eprintln!("{}", pd.name);
@@ -206,12 +219,13 @@ pub fn list_all() -> ! {
     std::process::exit(0);
 }
 
+/// Main entry point for the example command line application.
 pub fn main() -> Result<()> {
     let can_can = CanCan::parse();
 
     let connection =
         ConnectionDescriptor::parse_from(std::iter::once("").chain(can_can.connection.split(" ")))
-            .connect(can_can.source_address)?;
+            .connect()?;
 
     let cli = &mut CanContext {
         can_can,
@@ -249,6 +263,7 @@ pub fn main() -> Result<()> {
     Ok(())
 }
 
+/// Send an arbitrary CAN packet.
 fn send(can_can: &mut CanContext, id: u32, payload: &[u8]) -> Result<()> {
     let packet = Packet::new(id, payload);
     can_can.connection.send(&packet)?;
@@ -258,6 +273,7 @@ fn send(can_can: &mut CanContext, id: u32, payload: &[u8]) -> Result<()> {
 const PING_PGN: u32 = 0xFF00;
 const SEND_PGN: u32 = 0xFF01;
 
+/// Bandwidth test.  Send as much data to [da] with as many requests as it will respond to.
 fn bandwidth(can_can: &mut CanContext) -> Result<()> {
     let source_address = can_can.can_can.source_address;
     let destination_address = can_can.can_can.destination_address;
@@ -278,6 +294,7 @@ fn bandwidth(can_can: &mut CanContext) -> Result<()> {
     }
 }
 
+/// Latency test. Ping [da] with as many requests as it will respond to.
 fn ping(cli: &mut CanContext) -> Result<()> {
     let source_address = cli.can_can.source_address;
     let destination_address = cli.can_can.destination_address;
@@ -318,6 +335,7 @@ fn ping(cli: &mut CanContext) -> Result<()> {
     }
 }
 
+/// Server for bandwidth and ping tests.
 fn server(cli: &mut CanContext) -> Result<()> {
     let sa = cli.can_can.source_address;
     let mut count: i64 = 0;
@@ -378,6 +396,7 @@ fn server(cli: &mut CanContext) -> Result<()> {
     Ok(())
 }
 
+/// Read the VIN using J1939.
 fn vin(can_can: &mut CanContext) -> Result<()> {
     let connection = can_can.connection.as_mut();
     {
@@ -433,6 +452,7 @@ fn vin(can_can: &mut CanContext) -> Result<()> {
     Ok(())
 }
 
+/// Dump Vector ASC compatible log to stdout.
 fn log(can_can: &mut CanContext) -> Result<()> {
     let connection = can_can.connection.as_mut();
     let mut iter = connection.iter().flatten().map(|p| p.into());

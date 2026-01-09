@@ -1,5 +1,6 @@
 use std::{fmt::*, time::Duration};
 
+/// A CAN packet.
 #[derive(Debug, Clone)]
 pub struct Packet {
     pub id: u32,
