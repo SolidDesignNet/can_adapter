@@ -448,7 +448,7 @@ mod tests {
     use super::*;
     #[test]
     pub fn send14_bam() -> Result<()> {
-        let mut rx_connection = Box::new(SimulatedConnection::new()?);
+        let mut rx_connection = Box::new(SimulatedConnection::new(None)?);
         let mut tx_connection = rx_connection.clone();
 
         let mut iter = rx_connection
@@ -467,7 +467,7 @@ mod tests {
     }
     #[test]
     pub fn send14_ds() -> Result<()> {
-        let mut rx_connection = Box::new(SimulatedConnection::new()?);
+        let mut rx_connection = Box::new(SimulatedConnection::new(None)?);
         let mut tx_connection = rx_connection.clone();
 
         // log everything

@@ -162,7 +162,7 @@ mod tests {
     use anyhow::Ok;
     #[test]
     fn send8() -> Result<()> {
-        let connection = SimulatedConnection::new()?;
+        let connection = SimulatedConnection::new(None)?;
         let mut stream = connection.iter_for(Duration::from_secs(2));
         let tp = Iso15765::new(&connection, 0xDA00, Duration::from_secs(2), 0xF9, 0);
         tp.send(&[1, 2, 3])?;
@@ -177,7 +177,7 @@ mod tests {
     }
     #[test]
     fn send_receive() -> Result<()> {
-        let connection = SimulatedConnection::new()?;
+        let connection = SimulatedConnection::new(None)?;
 
         let log = connection.iter();
         thread::spawn(move || log.filter(|p| p.is_some()).for_each(|p| eprintln!("{p:?}")));
@@ -202,7 +202,7 @@ mod tests {
     #[test]
     fn send14() -> Result<()> {
         const DURATION: Duration = Duration::from_secs(2);
-        let rx_connection = SimulatedConnection::new()?;
+        let rx_connection = SimulatedConnection::new(None)?;
         let tx_connection = rx_connection.clone();
 
         let mut stream = rx_connection.iter_for(DURATION);
@@ -221,7 +221,7 @@ mod tests {
     #[test]
     fn send4000() -> Result<()> {
         const DURATION: Duration = Duration::from_secs(2);
-        let rx_connection = SimulatedConnection::new()?;
+        let rx_connection = SimulatedConnection::new(None)?;
         let tx_connection = rx_connection.clone();
 
         let mut stream = rx_connection.iter_for(DURATION);
@@ -284,7 +284,7 @@ mod tests {
     }
     #[test]
     fn example() -> Result<()> {
-        let connection = SimulatedConnection::new()?;
+        let connection = SimulatedConnection::new(None)?;
         let sim_connection = connection.clone();
 
         // let log = connection.iter_for(Duration::from_secs(9999));

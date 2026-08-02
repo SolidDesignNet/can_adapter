@@ -27,7 +27,7 @@ pub mod socketcanconnection;
 #[cfg(target_os = "linux")]
 use socketcanconnection::SocketCanConnection;
 
-use crate::{j1939::j1939_packet::J1939Packet, packet::Packet};
+use crate::{j1939::j1939_packet::J1939Packet, packet::Packet, sim::SimulatedConnection};
 
 /// Simple CAN tool for sending and receiving CAN packets over various adapters.
 /// This struct
@@ -110,7 +110,7 @@ enum CanCommand {
     },
 }
 
-fn hex_array(arg: &str) -> Result<Box<[u8]>, std::num::ParseIntError> {
+fn hex_array(_arg: &str) -> Result<Box<[u8]>, std::num::ParseIntError> {
     todo!()
     //Ok(Box::new([0, 0, 0]))
 }
@@ -121,7 +121,10 @@ pub enum ConnectionDescriptor {
     /// List avaliable adapters
     List {},
     /// Simulation - TODO
-    Sim {},
+    Sim {
+        //#[arg(long, short('f'))]
+        file: Option<String>,
+    },
     /// SAE J2534 - TODO
     J2534 {},
     /// Linux "socketcan" interface. Modules must already be loaded.
@@ -174,7 +177,9 @@ impl ConnectionDescriptor {
         let connection = self;
         match &connection {
             ConnectionDescriptor::List {} => list_all(),
-            ConnectionDescriptor::Sim {} => todo!(),
+            ConnectionDescriptor::Sim { file } => {
+                Ok(Box::new(SimulatedConnection::new(file.clone())?))
+            }
             ConnectionDescriptor::J2534 {} => todo!(),
             #[cfg(target_os = "linux")]
             ConnectionDescriptor::SocketCan { dev, speed } => {

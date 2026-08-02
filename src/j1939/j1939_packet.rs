@@ -1,4 +1,6 @@
-use std::{fmt::*, ops::Deref, time::Duration};
+use std::{fmt::*, ops::Deref, str::FromStr, time::Duration};
+
+use anyhow::Result;
 
 use crate::packet::Packet;
 
@@ -6,7 +8,14 @@ use crate::packet::Packet;
 pub struct J1939Packet {
     packet: Packet,
 }
+impl FromStr for J1939Packet {
+    type Err = anyhow::Error;
 
+    fn from_str(s: &str) -> Result<Self> {
+        let packet = Packet::from_str(s)?;
+        Ok(J1939Packet { packet })
+    }
+}
 impl From<Packet> for J1939Packet {
     fn from(value: Packet) -> Self {
         J1939Packet { packet: value }
@@ -103,13 +112,15 @@ impl J1939Packet {
 }
 
 impl Debug for J1939Packet {
-    fn fmt(&self, f: &mut Formatter<'_>) -> Result {
-        Debug::fmt(&self.packet, f)
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
+        Debug::fmt(&self.packet, f)?;
+        Ok(())
     }
 }
 impl Display for J1939Packet {
-    fn fmt(&self, f: &mut Formatter<'_>) -> Result {
-        Display::fmt(&self.packet, f)
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
+        Display::fmt(&self.packet, f)?;
+        Ok(())
     }
 }
 

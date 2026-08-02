@@ -1,6 +1,6 @@
 [package]
 name = "can_adapter"
-version = "1.0.3"
+version = "1.0.4"
 edition = "2021"
 license = "MIT"
 description = "Library to load CAN adapters typically used to diagnose vehicles."
@@ -18,15 +18,15 @@ name = "can_adapter"
 path = "src/main.rs"
 
 [dependencies]
-anyhow = "1.0.100"
+anyhow = "1.0.104"
 libloading = "0.9.0"
 rust-ini = "0.21.3"
-clap = { version = "4.5.54", features = ["derive"] }
+clap = { version = "4.6.5", features = ["derive"] }
 clap-num = "1.2.0"
 color-print = { version = "0.3.7" }
 dbg_hex = { version = "0.2.0" }
-serialport = "4.8.1"
-zerocopy = { version = "0.8.33", features = ["derive"] }
+serialport = "4.9.0"
+zerocopy = { version = "0.8.55", features = ["derive"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
-socketcan = { version = "3.5.0", features = ["enumerate"] }
+socketcan = { version = "3.6.2", features = ["enumerate"] }

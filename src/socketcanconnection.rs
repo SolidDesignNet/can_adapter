@@ -39,7 +39,7 @@ pub struct SocketCanConnection {
 
 impl SocketCanConnection {
     // FIXME add speed support.  Currently requires root access to configure network stack!
-    pub fn new(str: &str, speed: u64) -> Result<SocketCanConnection, anyhow::Error> {
+    pub fn new(str: &str, _speed: u64) -> Result<SocketCanConnection, anyhow::Error> {
         let socket_can_connection = SocketCanConnection {
             socket: Arc::new(Mutex::new(CanSocket::open(str)?)),
             bus: PushBus::new("Socket CAN"),
